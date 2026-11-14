@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>San Diego Kite Forecast (KSAN)</title>
+<style>
+:root{--bg:#0b1b3a;--panel:#12285a;--line:#2a4380;--text:#e8eefc;--mute:#9fb3e0;--label:#1b3a7a}
+:root[data-theme="light"]{--bg:#f3f6fc;--panel:#e1e9f8;--line:#b8c5e2;--text:#10203f;--mute:#52638a;--label:#cfdbf3}
+:root[data-theme="light"] .ktbl td.good{background:#d3f2de}
+:root[data-theme="light"] .ktbl td.meh{background:#fbeabc}
+:root[data-theme="light"] .ktbl td.bad{background:#f8d4d4}
+:root[data-theme="light"] .circ{border:1px solid var(--line)}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-right:12px}
+.sw{margin:14px 0 0;flex:none;display:flex;align-items:center;gap:6px;background:none;border:0;color:var(--text);font:inherit;cursor:pointer;padding:0}
+.sw .track{width:42px;height:22px;border-radius:11px;background:var(--panel);border:1px solid var(--line);position:relative}
+.sw .knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text);transition:transform .2s}
+:root[data-theme="light"] .sw .knob{transform:translateX(20px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.3 system-ui,sans-serif}
+h1{font-size:20px;margin:14px 12px 2px}
+.sub{color:var(--mute);margin:0 12px 10px;font-size:12px}
+.wrap{overflow-x:auto;border-top:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:92px repeat(24,54px);width:max-content}
+.grid>div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center;display:flex;align-items:center;justify-content:center;min-height:30px}
+.lab{position:sticky;left:0;z-index:2;background:var(--label);font-weight:700;font-size:11px;text-transform:uppercase;padding:4px}
+.day{background:var(--panel);font-weight:700}
+.sky{font-size:22px}
+.chart{grid-column:2/-1;padding:0!important;display:block!important;min-height:0!important}
+.circ{width:30px;height:30px;border-radius:50%;background:#dfe6f5;color:#123;font-weight:700;display:flex;align-items:center;justify-content:center}
+.arrow{font-size:20px;display:inline-block}
+.err{padding:12px;color:#ffb4b4}
+.layout{display:flex;align-items:flex-start;gap:12px;padding-right:12px}
+.layout .wrap{flex:1;min-width:0}
+#kiteBox{flex:0 0 300px;margin-top:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;line-height:1.35}
+#kiteBox h2{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
+#kiteBox h3{margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
+#kiteBox ul{margin:0;padding-left:16px}#kiteBox li{margin:2px 0}
+.ktbl{width:100%;border-collapse:collapse}
+.ktbl th,.ktbl td{border:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
+.ktbl th{background:var(--label);font-size:11px}
+.ktbl td.rt{font-weight:700}
+.ktbl td.rt::first-letter{text-transform:uppercase}
+.ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
+.ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
+.basis{margin-top:10px;color:var(--mute);font-size:11px}
+@media(max-width:900px){.layout{flex-direction:column;padding:0 8px}.layout .wrap{width:100%}#kiteBox{order:-1;flex:none;width:100%;margin-top:8px}}
+</style>
+<script>
+(function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}
+if(!t)t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+document.documentElement.setAttribute('data-theme',t)})();
+</script>
+</head>
+<body>
+<div class="top">
+<h1>San Diego International (KSAN) Forecast</h1>
+<button class="sw" id="themeSw" role="switch" aria-label="Light mode" aria-checked="false"><span>🌙</span><span class="track"><span class="knob"></span></span><span>☀️</span></button>
+</div>
+<p class="sub" id="sub">Loading from weather.gov…</p>
+<div class="layout">
+<div class="wrap"><div class="grid" id="grid"></div></div>
+<aside id="kiteBox">
+  <h2>Kiteability</h2>
+  <table class="ktbl">
+    <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th></tr></thead>
+    <tbody id="kiteRows"><tr><td colspan="3">Loading…</td></tr></tbody>
+  </table>
+  <h3>Rating rules (max wind of the day)</h3>
+  <ul>
+    <li><b>15+ kt:</b> work is canceled, you're going kiting!</li>
+    <li><b>13–14 kt:</b> excellent kiting day, get the twin tip and the surfboard</li>
+    <li><b>9–12 kt:</b> good kiting day</li>
+    <li><b>7–8 kt:</b> foilable</li>
+    <li><b>Under 7 kt, gusts 4+ kt:</b> foilable, might swim</li>
+    <li><b>Anything lower:</b> not kiteable</li>
+  </ul>
+  <h3>Wind direction (FROM)</h3>
+  <ul>
+    <li><b>180–260°:</b> south &amp; gusty</li>
+    <li><b>261–360° and 0–20°:</b> west/northwest</li>
+    <li><b>21–160°:</b> east wind, not good</li>
+  </ul>
+  <div class="basis">Based on minimum 15m kite and 630cm foil.</div>
+</aside>
+</div>
+<script>
+const LAT=32.7336, LON=-117.1832, TZ='America/Los_Angeles', COLS=24, STEP=3;
+const $=id=>document.getElementById(id);
+(function(){
+  const root=document.documentElement, sw=$('themeSw');
+  const sync=()=>sw.setAttribute('aria-checked',root.getAttribute('data-theme')==='light');
+  sync();
+  sw.addEventListener('click',()=>{
+    const t=root.getAttribute('data-theme')==='light'?'dark':'light';
+    root.setAttribute('data-theme',t); sync();
+    try{localStorage.setItem('theme',t)}catch(e){}
+  });
+})();
+
+function durHours(d){const m=d.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/);return (+(m[1]||0))*24+(+(m[2]||0))||1}
+function toHourly(layer,spread){ // {validTime:"ISO/PT3H", value} -> Map(hourMs -> value)
+  const map=new Map();
+  (layer?.values||[]).forEach(v=>{
+    const [s,d]=v.validTime.split('/'); const t=Date.parse(s), n=durHours(d);
+    for(let i=0;i<n;i++) map.set(t+i*3600e3, spread&&v.value!=null?v.value/n:v.value);
+  });
+  return map;
+}
+const hourFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hour12:true});
+const dayFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'short',month:'short',day:'numeric'});
+const hourNum=t=>+new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hourCycle:'h23'}).format(t);
+
+function area(vals,color,min,max,fmt=v=>Math.round(v)){
+  const W=COLS*54,H=80,p=16;
+  const ok=vals.filter(v=>v!=null); if(!ok.length) return '';
+  min=min??Math.min(...ok); max=max??Math.max(...ok); if(max===min) max=min+1;
+  const x=i=>i*54+27, y=v=>H-6-((v-min)/(max-min))*(H-6-p);
+  let pts=vals.map((v,i)=>v==null?null:[x(i),y(v)]).filter(Boolean);
+  const line=pts.map((q,i)=>(i?'L':'M')+q[0]+','+q[1]).join('');
+  const poly=line+`L${pts.at(-1)[0]},${H}L${pts[0][0]},${H}Z`;
+  const labels=vals.map((v,i)=>v==null?'':`<text x="${x(i)}" y="${y(v)-4}" text-anchor="middle" font-size="11" style="fill:var(--text)">${fmt(v)}</text>`).join('');
+  return `<svg width="${W}" height="${H}"><defs><linearGradient id="g${color.slice(1)}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}"/><stop offset="1" stop-color="${color}" stop-opacity=".15"/></linearGradient></defs><path d="${poly}" fill="url(#g${color.slice(1)})"/><path d="${line}" stroke="${color}" fill="none" stroke-width="2"/>${labels}</svg>`;
+}
+const skyIcon=c=>c==null?'':c<15?'☀️':c<40?'🌤️':c<65?'⛅':c<85?'🌥️':'☁️';
+const skyWord=c=>c==null?'':c<15?'Clear':c<40?'Mostly Clear':c<65?'Partly Cloudy':c<85?'Mostly Cloudy':'Cloudy';
+const cardinal=d=>['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(d/22.5)%16];
+
+async function load(){
+  try{
+    const pt=await (await fetch(`https://api.weather.gov/points/${LAT},${LON}`)).json();
+    const g=(await (await fetch(pt.properties.forecastGridData)).json()).properties;
+    const L={sky:toHourly(g.skyCover),temp:toHourly(g.temperature),wd:toHourly(g.windDirection),
+      ws:toHourly(g.windSpeed),gust:toHourly(g.windGust),pop:toHourly(g.probabilityOfPrecipitation),
+      rh:toHourly(g.relativeHumidity),dew:toHourly(g.dewpoint),vis:toHourly(g.visibility),
+      ceil:toHourly(g.ceilingHeight),qpf:toHourly(g.quantitativePrecipitation,true),
+      thun:toHourly(g.probabilityOfThunder)};
+    // first column: next 3-hour boundary (local)
+    let t=Math.ceil(Date.now()/3600e3)*3600e3; while(hourNum(t)%STEP) t+=3600e3;
+    const times=Array.from({length:COLS},(_,i)=>t+i*STEP*3600e3);
+    const get=(k,conv=v=>v)=>times.map(x=>{const v=L[k].get(x);return v==null?null:conv(v)});
+    const sky=get('sky'), temp=get('temp',c=>c*9/5+32), wd=get('wd'),
+          ws=get('ws',k=>k*0.621371), gust=get('gust',k=>k*0.621371), pop=get('pop'), rh=get('rh');
+    const grid=$('grid'); let h='';
+    const row=(label,cells)=>h+=`<div class="lab">${label}</div>`+cells.map(c=>`<div>${c}</div>`).join('');
+    h+='<div class="lab">Date</div>'+times.map(x=>`<div class="day" style="font-size:10px">${dayFmt.format(x)}</div>`).join('');
+    row('Hour',times.map(x=>hourFmt.format(x)));
+    row('Sky',sky.map(c=>`<div><span class="sky">${skyIcon(c)}</span></div>`.replace(/<\/?div>/g,'')));
+    row('',sky.map(c=>`<span style="font-size:10px;color:var(--mute)">${skyWord(c)}</span>`));
+    h+=`<div class="lab">Temp (°F)</div><div class="chart">${area(temp,'#e8613a')}</div>`;
+    row('Wind dir',wd.map(d=>d==null?'':`<span class="arrow" style="transform:rotate(${d+180}deg)">↑</span>`));
+    row('',wd.map(d=>d==null?'':`<span style="font-size:10px;color:var(--mute)">${cardinal(d)} ${Math.round(d)}°</span>`));
+    h+=`<div class="lab">Avg wind (mph)</div><div class="chart">${area(ws,'#3a9ad9',0)}</div>`;
+    h+=`<div class="lab">Max gust (mph)</div><div class="chart">${area(gust,'#4fcf6a',0)}</div>`;
+    row('Cloud cover %',sky.map(c=>c==null?'':`<div class="circ">${Math.round(c)}</div>`));
+    const ceilFt=times.map(x=>{const v=L.ceil.get(x);return v==null?null:Math.round(v*3.28084/100)*100});
+    const vis=get('vis',m=>Math.min(10,Math.round(m/1609.34*10)/10));
+    row('Cloud base ceiling (ft AGL)',ceilFt.map(v=>v==null?'<span style="color:var(--mute)">—</span>':v));
+    row('Visibility (mi)',vis.map(v=>v==null?'':Number.isInteger(v)?v:v.toFixed(1)));
+    const rules=times.map((x,i)=>{
+      const c=ceilFt[i]??99999, v=vis[i]??10;
+      return (c<500||v<1)?['LIFR','#c0392b']:(c<1000||v<3)?['IFR','#e67e22']:(c<=3000||v<=5)?['MVFR','#1e3cff']:['VFR','#1f8a2e'];
+    });
+    h+='<div class="lab">Flight rule</div>'+rules.map(r=>`<div style="background:${r[1]};color:#fff;font-weight:700;font-size:11px">${r[0]}</div>`).join('');
+    row('Chance of precip %',pop.map(v=>v==null?'':`<div style="width:100%;text-align:center"><div>${Math.round(v)}</div><div style="height:5px;margin:3px 6px 0;background:linear-gradient(90deg,#6aa8ff ${v}%,#243a6e ${v}%)"></div></div>`));
+    const qpf=times.map(x=>{let s=0,any=false;for(let k=0;k<STEP;k++){const v=L.qpf.get(x+k*3600e3);if(v!=null){s+=v;any=true}}return any?s/25.4:null});
+    row('Precip amount (in)',qpf.map(v=>v==null||v<0.005?'<span style="color:var(--mute)">-</span>':v.toFixed(2)));
+    row('Chance of thunder %',get('thun').map(v=>v==null?'':Math.round(v)));
+    row('Rel hum %',rh.map(v=>v==null?'':Math.round(v)));
+    const dew=get('dew',c=>c*9/5+32);
+    h+=`<div class="lab">Dew point (°F)</div><div class="chart">${area(dew,'#6fd48a')}</div>`;
+    const spread=temp.map((t,i)=>t==null||dew[i]==null?null:t-dew[i]);
+    h+=`<div class="lab">Temp/dew spread (°F)</div><div class="chart">${area(spread,'#e88a8a',0)}</div>`;
+    grid.innerHTML=h;
+
+    // ---- Kiteability by day (rules in knots) ----
+    const kt=k=>k*0.539957;
+    const dayKey=ms=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ}).format(ms);
+    const dayName=ms=>new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'long'}).format(ms);
+    const t0=Math.floor(Date.now()/3600e3)*3600e3, days=new Map();
+    for(let i=0;i<72;i++){
+      const ms=t0+i*3600e3, key=dayKey(ms);
+      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null});
+      const d=days.get(key), s=L.ws.get(ms), gu=L.gust.get(ms);
+      if(s!=null&&(d.s==null||kt(s)>d.s)){d.s=kt(s);d.dir=L.wd.get(ms)}
+      if(gu!=null&&(d.g==null||kt(gu)>d.g)) d.g=kt(gu);
+    }
+    const rate=(s,g)=>{
+      if(s!=null&&s>=15) return ["work is canceled, you're going kiting!","good"];
+      if(s!=null&&s>=13) return ["excellent kiting day, get the twin tip and the surfboard","good"];
+      if(s!=null&&s>=9) return ["good kiting day","good"];
+      if(s!=null&&s>=7) return ["foilable","meh"];
+      const low=g??s;
+      return low!=null&&low>=4?["foilable, might swim","meh"]:["not kiteable","bad"];
+    };
+    const dirNote=d=>{
+      if(d==null) return '—'; d=((Math.round(d)%360)+360)%360;
+      if(d>=180&&d<=260) return 'south & gusty';
+      if(d>=261||d<=20) return 'west/northwest';
+      if(d>=21&&d<=160) return 'east wind, not good';
+      return '—';
+    };
+    $('kiteRows').innerHTML=[...days.values()].slice(0,3).map(d=>{
+      const [txt,cls]=rate(d.s,d.g);
+      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${dirNote(d.dir)}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td></tr>`;
+    }).join('');
+    $('sub').textContent=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ})} PT · Source: NWS / weather.gov · 3-hour steps`;
+  }catch(e){ $('sub').innerHTML='<span class="err">Could not load forecast. Check your connection and refresh.</span>'; console.error(e); }
+}
+load(); setInterval(load,30*60e3);
+</script>
+</body>
+</html>
