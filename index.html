@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=800">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="KSAN Wx">
 <title>San Diego Kite Forecast (KSAN)</title>
 <style>
 :root{--bg:#0b1b3a;--panel:#12285a;--line:#2a4380;--text:#e8eefc;--mute:#9fb3e0;--label:#1b3a7a}
@@ -90,6 +94,36 @@ const $=id=>document.getElementById(id);
   });
 })();
 
+async function getTaf(){
+  for(const u of ['/api/aviation','https://aviationweather.gov/api/data/taf?ids=KSAN&format=json']){
+    try{const r=await fetch(u);if(!r.ok)continue;const j=await r.json();if(Array.isArray(j)&&j[0]&&j[0].fcsts)return j[0]}catch(e){}
+  }
+  return null;
+}
+function parseVis(v){
+  if(v==null||v==='')return null;
+  if(typeof v==='number')return v;
+  v=String(v).trim();
+  if(v.endsWith('+'))return 10; // "6+" = 6 miles or more
+  return v.split(/\s+/).reduce((a,p)=>a+(p.includes('/')?(+p.split('/')[0])/(+p.split('/')[1]):parseFloat(p)||0),0);
+}
+function tafState(taf,ms){
+  if(!taf)return null; const t=ms/1000;
+  if(t<taf.validTimeFrom||t>=taf.validTimeTo)return null;
+  let st=null;
+  for(const f of taf.fcsts||[]){
+    const ch=f.fcstChange||'';
+    if(ch==='TEMPO'||ch==='PROB')continue;
+    const at=ch==='BECMG'?f.timeTo:f.timeFrom;
+    if(st&&t<at)continue;
+    const vis=parseVis(f.visib), cl=Array.isArray(f.clouds)?f.clouds:[];
+    if(!st)st={vis,clouds:cl};
+    else if(ch==='BECMG')st={vis:vis??st.vis,clouds:cl.length?cl:st.clouds};
+    else st={vis:vis??st.vis,clouds:cl};
+  }
+  return st;
+}
+const baseOf=(cl,covers)=>{const b=cl.filter(c=>covers.includes(c.cover)&&typeof c.base==='number').map(c=>c.base);return b.length?Math.min(...b):null};
 function durHours(d){const m=d.match(/P(?:(\d+)D)?T?(?:(\d+)H)?/);return (+(m[1]||0))*24+(+(m[2]||0))||1}
 function toHourly(layer,spread){ // {validTime:"ISO/PT3H", value} -> Map(hourMs -> value)
   const map=new Map();
@@ -122,6 +156,7 @@ async function load(){
   try{
     const pt=await (await fetch(`https://api.weather.gov/points/${LAT},${LON}`)).json();
     const g=(await (await fetch(pt.properties.forecastGridData)).json()).properties;
+    const taf=await getTaf();
     const L={sky:toHourly(g.skyCover),temp:toHourly(g.temperature),wd:toHourly(g.windDirection),
       ws:toHourly(g.windSpeed),gust:toHourly(g.windGust),pop:toHourly(g.probabilityOfPrecipitation),
       rh:toHourly(g.relativeHumidity),dew:toHourly(g.dewpoint),vis:toHourly(g.visibility),
@@ -149,15 +184,19 @@ async function load(){
     chartRow(lb('Average wind speeds','(mph)'),area(ws,'#3a9ad9',0));
     chartRow(lb('Maximum wind gust speeds','(mph)'),area(gust,'#4fcf6a',0));
     row(lb('Cloud coverage','%'),sky.map(c=>c==null?'':`<div class="circ" style="${c<40?'opacity:.5':''}">${Math.round(c)}</div>`));
-    const ceilFt=times.map(x=>{const v=L.ceil.get(x);return v==null?null:Math.round(v*3.28084/100)*100});
-    const vis=get('vis',m=>Math.min(10,Math.round(m/1609.34*10)/10));
+    const st=times.map(x=>tafState(taf,x));
+    const ceilFt=st.map(q=>q?baseOf(q.clouds,['BKN','OVC','OVX']):null);
+    const lowFt=st.map(q=>q?baseOf(q.clouds,['FEW','SCT','BKN','OVC','OVX']):null);
+    const vis=st.map(q=>q?q.vis:null);
     row(lb('Cloud base @ 60% coverage','(AGL in feet)'),ceilFt.map(v=>v==null?'':`<span class="cloud">${v}</span>`));
-    chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>Number.isInteger(v)?v:v.toFixed(1)));
+    row(lb('Lowest cloud base','(AGL in feet)'),lowFt.map(v=>v==null?'':`<span class="cloud">${v}</span>`));
+    chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>v>=10?'6+':Number.isInteger(v)?v:v.toFixed(1)));
     const rules=times.map((x,i)=>{
+      if(!st[i]) return ['–','var(--panel)','var(--mute)'];
       const c=ceilFt[i]??99999, v=vis[i]??10;
       return (c<500||v<1)?['LIFR','#c0392b']:(c<1000||v<3)?['IFR','#e67e22']:(c<=3000||v<=5)?['MVFR','#1e3cff']:['VFR','#1f8a2e'];
     });
-    h+=lb('Flight rule')+rules.map(r=>`<div style="background:${r[1]};color:#fff;font-weight:700;font-size:10px">${r[0]}</div>`).join('');
+    h+=lb('Flight rule')+rules.map(r=>`<div style="background:${r[1]};color:${r[2]||'#fff'};font-weight:700;font-size:10px">${r[0]}</div>`).join('');
     row(lb('Chance of precip'),pop.map(v=>v==null?'':`<div style="width:100%;text-align:center"><div>${Math.round(v)}%</div><div style="height:5px;margin:3px 4px 0;background:linear-gradient(90deg,#6aa8ff ${v}%,#243a6e ${v}%)"></div></div>`));
     const qpf=times.map(x=>{let s=0,any=false;for(let k=0;k<STEP;k++){const v=L.qpf.get(x+k*3600e3);if(v!=null){s+=v;any=true}}return any?s/25.4:null});
     row(lb('Precip amount','(range in inches)'),qpf.map(v=>v==null||v<0.005?'-':v.toFixed(2)));
@@ -200,7 +239,7 @@ async function load(){
       const [txt,cls]=rate(d.s,d.g);
       return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${dirNote(d.dir)}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td></tr>`;
     }).join('');
-    $('sub').textContent=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ})} PT · Source: NWS / weather.gov · 3-hour steps`;
+    $('sub').textContent=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ})} PT · Source: NWS / weather.gov · Cloud base & visibility: KSAN TAF (aviationweather.gov), about 30 hours ahead · 3-hour steps${taf?'':' · (aviation data unavailable)'}`;
   }catch(e){ $('sub').innerHTML='<span class="err">Could not load forecast. Check your connection and refresh.</span>'; console.error(e); }
 }
 load(); setInterval(load,30*60e3);
