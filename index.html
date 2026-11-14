@@ -49,6 +49,7 @@ h1{font-size:20px;margin:14px 12px 2px}
 .ktbl td.rt{font-weight:700}
 .ktbl td.rt::first-letter{text-transform:uppercase}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
+.kdir{text-align:center}.kdir .arrow{font-size:1.5em;line-height:1}.ktbl .kdir small{margin-top:0}
 .ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
 .basis{margin-top:10px;color:var(--mute);font-size:11px}
 @media(max-width:900px){body{overflow-x:hidden}.layout{flex-direction:column;padding:0 8px;width:800px;min-width:800px;overflow:hidden}.grid{font-size:10px}.lab{font-size:9px;padding:2px;position:static}.layout .wrap{width:100%;overflow:hidden}#kiteBox{order:-1;flex:none;width:100%;margin-top:8px;font-size:18px;padding:14px}#kiteBox h2{font-size:20px}.ktbl th,.ktbl td{font-size:17px;padding:8px 10px}.basis{font-size:15px}}
@@ -73,8 +74,8 @@ document.documentElement.setAttribute('data-theme',t)})();
 <aside id="kiteBox">
   <h2>Kiteability</h2>
   <table class="ktbl">
-    <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th></tr></thead>
-    <tbody id="kiteRows"><tr><td colspan="3">Loading…</td></tr></tbody>
+    <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th><th>Wind dir</th></tr></thead>
+    <tbody id="kiteRows"><tr><td colspan="4">Loading…</td></tr></tbody>
   </table>
   <div class="basis">Based on minimum 15m kite and 630cm foil.</div>
 </aside>
@@ -245,9 +246,10 @@ async function load(){
     const t0=Math.floor(Date.now()/3600e3)*3600e3, days=new Map();
     for(let i=0;i<72;i++){
       const ms=t0+i*3600e3, key=dayKey(ms);
-      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null});
+      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null,vx:0,vy:0});
       const d=days.get(key), s=L.ws.get(ms), gu=L.gust.get(ms);
       if(s!=null&&(d.s==null||kt(s)>d.s)){d.s=kt(s);d.dir=L.wd.get(ms)}
+      const wdir=L.wd.get(ms); if(s!=null&&wdir!=null){const r=wdir*Math.PI/180;d.vx+=kt(s)*Math.sin(r);d.vy+=kt(s)*Math.cos(r)}
       if(gu!=null&&(d.g==null||kt(gu)>d.g)) d.g=kt(gu);
     }
     const rate=(s,g)=>{
@@ -267,7 +269,9 @@ async function load(){
     };
     $('kiteRows').innerHTML=[...days.values()].slice(0,3).map(d=>{
       const [txt,cls]=rate(d.s,d.g);
-      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${dirNote(d.dir)}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td></tr>`;
+      const pd=(Math.hypot(d.vx,d.vy)>0.5)?((Math.atan2(d.vx,d.vy)*180/Math.PI)+360)%360:null;
+      const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
+      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${dirNote(d.dir)}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
     $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ})} PT · Source: NWS / weather.gov · Cloud base &amp; visibility: KSAN TAF for about 30 hours, then a model estimate (faded clouds) · 3-hour steps${taf?'':' · (TAF unavailable)'}${model?'':' · (model data unavailable)'}`;
   }catch(e){ $('sub').innerHTML='<span class="err">Could not load forecast. Check your connection and refresh.</span>'; console.error(e); }
