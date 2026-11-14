@@ -22,6 +22,8 @@ h1{font-size:20px;margin:14px 12px 2px}
 .sub{color:var(--mute);margin:0 12px 10px;font-size:12px}
 .wrap{overflow-x:auto;border-top:1px solid var(--line)}
 .grid{display:grid;grid-template-columns:var(--lw,84px) repeat(24,var(--cw,36px));width:max-content}
+.lab small{display:block;font-weight:400;text-transform:none;font-size:.85em;opacity:.85}
+.cloud{background:#e3e8f2;color:#1b2a4a;border-radius:10px;padding:2px 4px;font-size:9px;font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .sm{font-size:9px;line-height:1.05;white-space:normal;text-align:center;color:var(--mute)}
 .grid>div{border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:center;display:flex;align-items:center;justify-content:center;min-height:30px}
 .lab{position:sticky;left:0;z-index:2;background:var(--label);font-weight:700;font-size:11px;text-transform:uppercase;padding:4px}
@@ -45,7 +47,7 @@ h1{font-size:20px;margin:14px 12px 2px}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
 .ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
 .basis{margin-top:10px;color:var(--mute);font-size:11px}
-@media(max-width:900px){.layout{flex-direction:column;padding:0 8px;min-width:800px}.grid{font-size:10px}.lab{font-size:9px;padding:2px}.layout .wrap{width:100%;overflow-x:visible}.lab{position:static}#kiteBox{order:-1;flex:none;width:min(440px,calc(100vw - 16px));margin-top:8px}}
+@media(max-width:900px){body{overflow-x:hidden}.layout{flex-direction:column;padding:0 8px;width:800px;min-width:800px;overflow:hidden}.grid{font-size:10px}.lab{font-size:9px;padding:2px;position:static}.layout .wrap{width:100%;overflow:hidden}#kiteBox{order:-1;flex:none;width:100%;margin-top:8px;font-size:18px;padding:14px}#kiteBox h2{font-size:20px}.ktbl th,.ktbl td{font-size:17px;padding:8px 10px}.basis{font-size:15px}}
 </style>
 <script>
 (function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}
@@ -133,38 +135,38 @@ async function load(){
           ws=get('ws',k=>k*0.621371), gust=get('gust',k=>k*0.621371), pop=get('pop'), rh=get('rh');
     const grid=$('grid'); let h='';
     const small=innerWidth<=900, LW=small?72:84, wrapW=document.querySelector('.layout .wrap').clientWidth;
-    CW=Math.max(small?26:30,Math.min(64,Math.floor((wrapW-LW-4)/COLS)));
+    CW=Math.max(small?26:30,Math.min(64,Math.floor((wrapW-LW-8)/COLS)));
     grid.style.setProperty('--lw',LW+'px'); grid.style.setProperty('--cw',CW+'px');
-    const row=(label,cells)=>h+=`<div class="lab">${label}</div>`+cells.map(c=>`<div>${c}</div>`).join('');
-    h+='<div class="lab">Date</div>';
+    const lb=(n,u)=>`<div class="lab"><div>${n}${u?`<small>${u}</small>`:''}</div></div>`;
+    const row=(label,cells)=>h+=label+cells.map(c=>`<div>${c}</div>`).join('');
+    const chartRow=(label,svg)=>h+=`${label}<div class="chart">${svg}</div>`;
+    h+=lb('Date');
     for(let i=0;i<times.length;){let j=i;const k=dayFmt.format(times[i]);while(j<times.length&&dayFmt.format(times[j])===k)j++;h+=`<div class="day" style="grid-column:span ${j-i};font-size:10px">${k}</div>`;i=j}
-    row('Hour',times.map(x=>hourFmt.format(x)));
-    row('Sky',sky.map(c=>`<div><span class="sky">${skyIcon(c)}</span></div>`.replace(/<\/?div>/g,'')));
-    row('',sky.map(c=>`<span class="sm">${skyWord(c)}</span>`));
-    h+=`<div class="lab">Temp (°F)</div><div class="chart">${area(temp,'#e8613a')}</div>`;
-    row('Wind dir',wd.map(d=>d==null?'':`<span class="arrow" style="transform:rotate(${d+180}deg)">↑</span>`));
-    row('',wd.map(d=>d==null?'':`<span class="sm">${cardinal(d)} ${Math.round(d)}°</span>`));
-    h+=`<div class="lab">Avg wind (mph)</div><div class="chart">${area(ws,'#3a9ad9',0)}</div>`;
-    h+=`<div class="lab">Max gust (mph)</div><div class="chart">${area(gust,'#4fcf6a',0)}</div>`;
-    row('Cloud cover %',sky.map(c=>c==null?'':`<div class="circ">${Math.round(c)}</div>`));
+    row(lb('Hour'),times.map(x=>hourFmt.format(x)));
+    row(lb('Sky'),sky.map(c=>`<span class="sky">${skyIcon(c)}</span>`));
+    chartRow(lb('Temp','(F)'),area(temp,'#e8613a'));
+    row(lb('Wind direction','(azimuth)'),wd.map((d,i)=>d==null?'':(ws[i]!=null&&ws[i]<1.5)?'<span class="sm">CALM</span>':`<div><div style="font-size:10px">${Math.round(d)}</div><span class="arrow" style="transform:rotate(${d+180}deg)">↑</span></div>`));
+    chartRow(lb('Average wind speeds','(mph)'),area(ws,'#3a9ad9',0));
+    chartRow(lb('Maximum wind gust speeds','(mph)'),area(gust,'#4fcf6a',0));
+    row(lb('Cloud coverage','%'),sky.map(c=>c==null?'':`<div class="circ" style="${c<40?'opacity:.5':''}">${Math.round(c)}</div>`));
     const ceilFt=times.map(x=>{const v=L.ceil.get(x);return v==null?null:Math.round(v*3.28084/100)*100});
     const vis=get('vis',m=>Math.min(10,Math.round(m/1609.34*10)/10));
-    row('Cloud base ceiling (ft AGL)',ceilFt.map(v=>v==null?'<span style="color:var(--mute)">—</span>':v));
-    row('Visibility (mi)',vis.map(v=>v==null?'':Number.isInteger(v)?v:v.toFixed(1)));
+    row(lb('Cloud base @ 60% coverage','(AGL in feet)'),ceilFt.map(v=>v==null?'':`<span class="cloud">${v}</span>`));
+    chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>Number.isInteger(v)?v:v.toFixed(1)));
     const rules=times.map((x,i)=>{
       const c=ceilFt[i]??99999, v=vis[i]??10;
       return (c<500||v<1)?['LIFR','#c0392b']:(c<1000||v<3)?['IFR','#e67e22']:(c<=3000||v<=5)?['MVFR','#1e3cff']:['VFR','#1f8a2e'];
     });
-    h+='<div class="lab">Flight rule</div>'+rules.map(r=>`<div style="background:${r[1]};color:#fff;font-weight:700;font-size:11px">${r[0]}</div>`).join('');
-    row('Chance of precip %',pop.map(v=>v==null?'':`<div style="width:100%;text-align:center"><div>${Math.round(v)}</div><div style="height:5px;margin:3px 6px 0;background:linear-gradient(90deg,#6aa8ff ${v}%,#243a6e ${v}%)"></div></div>`));
+    h+=lb('Flight rule')+rules.map(r=>`<div style="background:${r[1]};color:#fff;font-weight:700;font-size:10px">${r[0]}</div>`).join('');
+    row(lb('Chance of precip'),pop.map(v=>v==null?'':`<div style="width:100%;text-align:center"><div>${Math.round(v)}%</div><div style="height:5px;margin:3px 4px 0;background:linear-gradient(90deg,#6aa8ff ${v}%,#243a6e ${v}%)"></div></div>`));
     const qpf=times.map(x=>{let s=0,any=false;for(let k=0;k<STEP;k++){const v=L.qpf.get(x+k*3600e3);if(v!=null){s+=v;any=true}}return any?s/25.4:null});
-    row('Precip amount (in)',qpf.map(v=>v==null||v<0.005?'<span style="color:var(--mute)">-</span>':v.toFixed(2)));
-    row('Chance of thunder %',get('thun').map(v=>v==null?'':Math.round(v)));
-    row('Rel hum %',rh.map(v=>v==null?'':Math.round(v)));
+    row(lb('Precip amount','(range in inches)'),qpf.map(v=>v==null||v<0.005?'-':v.toFixed(2)));
+    row(lb('Chance of thunder','%'),get('thun').map(v=>v==null?'':Math.round(v)));
+    chartRow(lb('Rel hum','%'),area(rh,'#8f86f0',0,100));
     const dew=get('dew',c=>c*9/5+32);
-    h+=`<div class="lab">Dew point (°F)</div><div class="chart">${area(dew,'#6fd48a')}</div>`;
+    chartRow(lb('Dew point','(F)'),area(dew,'#6fd48a'));
     const spread=temp.map((t,i)=>t==null||dew[i]==null?null:t-dew[i]);
-    h+=`<div class="lab">Temp/dew spread (°F)</div><div class="chart">${area(spread,'#e88a8a',0)}</div>`;
+    chartRow(lb('Temp dew point spread','(F)'),area(spread,'#e88a8a',0));
     grid.innerHTML=h;
 
     // ---- Kiteability by day (rules in knots) ----
