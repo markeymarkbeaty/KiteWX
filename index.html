@@ -44,11 +44,14 @@ h1{font-size:20px;margin:14px 12px 2px}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
 .ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
 .basis{margin-top:10px;color:var(--mute);font-size:11px}
-@media(max-width:900px){.layout{flex-direction:column;padding:0 8px}.layout .wrap{width:100%}#kiteBox{order:-1;flex:none;width:100%;margin-top:8px}}
+@media(max-width:900px){.layout{flex-direction:column;padding:0 8px;min-width:1420px}.layout .wrap{width:100%;overflow-x:visible}.lab{position:static}#kiteBox{order:-1;flex:none;width:min(440px,calc(100vw - 16px));margin-top:8px}}
 </style>
 <script>
 (function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}
-if(!t)t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+if(!t){
+  var mobile=matchMedia('(max-width: 900px), (pointer: coarse)').matches;
+  t=!mobile?'light':(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+}
 document.documentElement.setAttribute('data-theme',t)})();
 </script>
 </head>
@@ -66,21 +69,6 @@ document.documentElement.setAttribute('data-theme',t)})();
     <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th></tr></thead>
     <tbody id="kiteRows"><tr><td colspan="3">Loading…</td></tr></tbody>
   </table>
-  <h3>Rating rules (max wind of the day)</h3>
-  <ul>
-    <li><b>15+ kt:</b> work is canceled, you're going kiting!</li>
-    <li><b>13–14 kt:</b> excellent kiting day, get the twin tip and the surfboard</li>
-    <li><b>9–12 kt:</b> good kiting day</li>
-    <li><b>7–8 kt:</b> foilable</li>
-    <li><b>Under 7 kt, gusts 4+ kt:</b> foilable, might swim</li>
-    <li><b>Anything lower:</b> not kiteable</li>
-  </ul>
-  <h3>Wind direction (FROM)</h3>
-  <ul>
-    <li><b>180–260°:</b> south &amp; gusty</li>
-    <li><b>261–360° and 0–20°:</b> west/northwest</li>
-    <li><b>21–160°:</b> east wind, not good</li>
-  </ul>
   <div class="basis">Based on minimum 15m kite and 630cm foil.</div>
 </aside>
 </div>
