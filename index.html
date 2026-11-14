@@ -45,7 +45,7 @@ h1{font-size:20px;margin:14px 12px 2px}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
 .ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
 .basis{margin-top:10px;color:var(--mute);font-size:11px}
-@media(max-width:900px){.layout{flex-direction:column;padding:0 8px;min-width:1000px}.layout .wrap{width:100%;overflow-x:visible}.lab{position:static}#kiteBox{order:-1;flex:none;width:min(440px,calc(100vw - 16px));margin-top:8px}}
+@media(max-width:900px){.layout{flex-direction:column;padding:0 8px;min-width:800px}.grid{font-size:10px}.lab{font-size:9px;padding:2px}.layout .wrap{width:100%;overflow-x:visible}.lab{position:static}#kiteBox{order:-1;flex:none;width:min(440px,calc(100vw - 16px));margin-top:8px}}
 </style>
 <script>
 (function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}
@@ -132,8 +132,8 @@ async function load(){
     const sky=get('sky'), temp=get('temp',c=>c*9/5+32), wd=get('wd'),
           ws=get('ws',k=>k*0.621371), gust=get('gust',k=>k*0.621371), pop=get('pop'), rh=get('rh');
     const grid=$('grid'); let h='';
-    const LW=84, wrapW=document.querySelector('.layout .wrap').clientWidth;
-    CW=Math.max(30,Math.min(64,Math.floor((wrapW-LW-2)/COLS)));
+    const small=innerWidth<=900, LW=small?72:84, wrapW=document.querySelector('.layout .wrap').clientWidth;
+    CW=Math.max(small?26:30,Math.min(64,Math.floor((wrapW-LW-4)/COLS)));
     grid.style.setProperty('--lw',LW+'px'); grid.style.setProperty('--cw',CW+'px');
     const row=(label,cells)=>h+=`<div class="lab">${label}</div>`+cells.map(c=>`<div>${c}</div>`).join('');
     h+='<div class="lab">Date</div>';
