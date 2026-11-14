@@ -15,6 +15,13 @@
 :root[data-theme="light"] .ktbl td.meh{background:#fbeabc}
 :root[data-theme="light"] .ktbl td.bad{background:#f8d4d4}
 :root[data-theme="light"] .circ{border:1px solid var(--line)}
+.tools{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.locbtn{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font:inherit;font-size:12px;padding:4px 8px;cursor:pointer}
+.locform{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 12px 8px}
+.locform[hidden]{display:none}
+.locform input{flex:1;min-width:180px;max-width:360px;font:inherit;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.locform button{font:inherit;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);cursor:pointer}
+#locMsg{font-size:12px;color:var(--mute);flex-basis:100%}
 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-right:12px}
 .sw{margin:14px 0 0;flex:none;display:flex;align-items:center;gap:6px;background:none;border:0;color:var(--text);font:inherit;cursor:pointer;padding:0}
 .sw .track{width:42px;height:22px;border-radius:11px;background:var(--panel);border:1px solid var(--line);position:relative}
@@ -65,9 +72,10 @@ document.documentElement.setAttribute('data-theme',t)})();
 </head>
 <body>
 <div class="top">
-<h1>San Diego International (KSAN) Forecast</h1>
-<button class="sw" id="themeSw" role="switch" aria-label="Light mode" aria-checked="false"><span>🌙</span><span class="track"><span class="knob"></span></span><span>☀️</span></button>
+<h1 id="ttl">San Diego International (KSAN) Forecast</h1>
+<div class="tools"><button class="sw" id="themeSw" role="switch" aria-label="Light mode" aria-checked="false"><span>🌙</span><span class="track"><span class="knob"></span></span><span>☀️</span></button><button class="locbtn" id="locBtn" type="button">📍 Change location</button></div>
 </div>
+<form class="locform" id="locForm" hidden autocomplete="off"><input id="locIn" placeholder="ICAO code or place, e.g. KLAX or Oceanside" autocapitalize="off" autocorrect="off" spellcheck="false"><button type="submit">Go</button><button type="button" id="locReset">San Diego</button><span id="locMsg"></span></form>
 <p class="sub" id="sub">Loading from weather.gov…</p>
 <div class="layout">
 <div class="wrap"><div class="grid" id="grid"></div></div>
@@ -82,7 +90,10 @@ document.documentElement.setAttribute('data-theme',t)})();
 </div>
 <script>
 let CW=54;
-const LAT=32.7336, LON=-117.1832, TZ='America/Los_Angeles', COLS=24, STEP=3;
+let LAT=32.7336, LON=-117.1832, TZ='America/Los_Angeles', ICAO='KSAN', PLACE='San Diego International (KSAN)';
+const COLS=24, STEP=3;
+const SD={lat:32.7336,lon:-117.1832,icao:'KSAN',place:'San Diego International (KSAN)'};
+try{const sv=JSON.parse(localStorage.getItem('loc')||'null');if(sv&&isFinite(sv.lat)&&isFinite(sv.lon)){LAT=sv.lat;LON=sv.lon;ICAO=sv.icao||null;PLACE=sv.place||'Selected location'}}catch(e){}
 const $=id=>document.getElementById(id);
 (function(){
   const root=document.documentElement, sw=$('themeSw');
@@ -96,14 +107,15 @@ const $=id=>document.getElementById(id);
 })();
 
 async function getTaf(){
-  for(const u of ['/api/aviation','https://aviationweather.gov/api/data/taf?ids=KSAN&format=json']){
+  if(!ICAO) return null;
+  for(const u of ['/api/aviation?ids='+ICAO,'https://aviationweather.gov/api/data/taf?ids='+ICAO+'&format=json']){
     try{const r=await fetch(u);if(!r.ok)continue;const j=await r.json();if(Array.isArray(j)&&j[0]&&j[0].fcsts)return j[0]}catch(e){}
   }
   return null;
 }
 async function getModel(){
   try{
-    const u='https://api.open-meteo.com/v1/forecast?latitude=32.7336&longitude=-117.1832&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,temperature_2m,dew_point_2m&temperature_unit=fahrenheit&forecast_days=5&timezone=GMT';
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,temperature_2m,dew_point_2m&temperature_unit=fahrenheit&forecast_days=5&timezone=GMT`;
     const r=await fetch(u); if(!r.ok) return null;
     const h=(await r.json()).hourly; if(!h||!h.time) return null;
     const m=new Map();
@@ -162,9 +174,13 @@ function toHourly(layer,spread){ // {validTime:"ISO/PT3H", value} -> Map(hourMs 
   });
   return map;
 }
-const hourFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hour12:true});
-const dayFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'short',month:'short',day:'numeric'});
-const hourNum=t=>+new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hourCycle:'h23'}).format(t);
+let hourFmt,dayFmt,hourNum;
+function mkFmt(){
+hourFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hour12:true});
+dayFmt=new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'short',month:'short',day:'numeric'});
+hourNum=t=>+new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hourCycle:'h23'}).format(t);
+}
+mkFmt();
 
 function area(vals,color,min,max,fmt=v=>Math.round(v)){
   const W=COLS*CW,H=80,p=16;
@@ -183,8 +199,13 @@ const cardinal=d=>['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW
 
 async function load(){
   try{
-    const pt=await (await fetch(`https://api.weather.gov/points/${LAT},${LON}`)).json();
-    const g=(await (await fetch(pt.properties.forecastGridData)).json()).properties;
+    $('ttl').textContent=PLACE+' Forecast'; document.title=PLACE+' Kite Forecast';
+    const pt=await (await fetch(`https://api.weather.gov/points/${LAT.toFixed(4)},${LON.toFixed(4)}`)).json();
+    if(!pt.properties||!pt.properties.forecastGridData){const e=new Error('nws');e.nws=true;throw e}
+    if(pt.properties.timeZone&&pt.properties.timeZone!==TZ){TZ=pt.properties.timeZone;mkFmt()}
+    const gj=await (await fetch(pt.properties.forecastGridData)).json();
+    if(!gj.properties){const e=new Error('nws');e.nws=true;throw e}
+    const g=gj.properties;
     const [taf,model]=await Promise.all([getTaf(),getModel()]);
     const L={sky:toHourly(g.skyCover),temp:toHourly(g.temperature),wd:toHourly(g.windDirection),
       ws:toHourly(g.windSpeed),gust:toHourly(g.windGust),pop:toHourly(g.probabilityOfPrecipitation),
@@ -271,11 +292,48 @@ async function load(){
       const [txt,cls]=rate(d.s,d.g);
       const pd=(Math.hypot(d.vx,d.vy)>0.5)?((Math.atan2(d.vx,d.vy)*180/Math.PI)+360)%360:null;
       const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
-      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${dirNote(d.dir)}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
+      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'?dirNote(d.dir):''}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
-    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ})} PT · Source: NWS / weather.gov · Cloud base &amp; visibility: KSAN TAF for about 30 hours, then a model estimate (faded clouds) · 3-hour steps${taf?'':' · (TAF unavailable)'}${model?'':' · (model data unavailable)'}`;
-  }catch(e){ $('sub').innerHTML='<span class="err">Could not load forecast. Check your connection and refresh.</span>'; console.error(e); }
+    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':' · (TAF unavailable)'}${model?'':' · (model data unavailable)'}`;
+    return 'ok';
+  }catch(e){ $('sub').innerHTML=e.nws?'<span class="err">No forecast for that spot. The National Weather Service only covers the US.</span>':'<span class="err">Could not load forecast. Check your connection and refresh.</span>'; console.error(e); return e.nws?'nws':'err'; }
 }
+const locForm=$('locForm'),locIn=$('locIn'),locMsg=$('locMsg');
+$('locBtn').addEventListener('click',()=>{locForm.hidden=!locForm.hidden;if(!locForm.hidden)locIn.focus()});
+async function jfetch(u){try{const r=await fetch(u);return r.ok?await r.json():null}catch(e){return null}}
+async function resolveLoc(q){
+  if(/^[A-Za-z][A-Za-z0-9]{3}$/.test(q)){
+    const id=q.toUpperCase();
+    for(const u of ['/api/lookup?ids='+id,'https://aviationweather.gov/api/data/airport?ids='+id+'&format=json']){
+      const j=await jfetch(u), a=Array.isArray(j)?j[0]:null;
+      const lat=a&&(a.lat??a.latitude), lon=a&&(a.lon??a.longitude);
+      if(isFinite(lat)&&isFinite(lon)&&lat!==null&&lon!==null) return {lat:+lat,lon:+lon,icao:id,place:(a.name?a.name.replace(/\b\w+/g,w=>w[0]+w.slice(1).toLowerCase()):id)+' ('+id+')'};
+    }
+  }
+  const j=await jfetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=1&language=en&format=json');
+  const r=j&&j.results&&j.results[0];
+  if(r) return {lat:r.latitude,lon:r.longitude,icao:null,place:r.name+(r.admin1?', '+r.admin1:'')};
+  return null;
+}
+async function setLoc(loc){
+  const prev={lat:LAT,lon:LON,icao:ICAO,place:PLACE};
+  LAT=loc.lat;LON=loc.lon;ICAO=loc.icao;PLACE=loc.place;
+  const res=await load();
+  if(res==='ok'){try{localStorage.setItem('loc',JSON.stringify(loc))}catch(e){}return true}
+  LAT=prev.lat;LON=prev.lon;ICAO=prev.icao;PLACE=prev.place;
+  await load(); return false;
+}
+locForm.addEventListener('submit',async ev=>{
+  ev.preventDefault(); const q=locIn.value.trim(); if(!q) return;
+  locMsg.textContent='Searching…';
+  const loc=await resolveLoc(q);
+  if(!loc){locMsg.textContent='Could not find "'+q+'". Try an ICAO code (like KLAX) or a city name.';return}
+  locMsg.textContent='Loading '+loc.place+'…';
+  const ok=await setLoc(loc);
+  locMsg.textContent=ok?'':'No forecast for '+loc.place+'. The National Weather Service only covers the US.';
+  if(ok){locIn.value='';locForm.hidden=true}
+});
+$('locReset').addEventListener('click',async()=>{locMsg.textContent='';await setLoc(SD);locForm.hidden=true});
 load(); setInterval(load,30*60e3);
 let lastW=innerWidth,rt;
 addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(innerWidth!==lastW){lastW=innerWidth;load()}},300)});
