@@ -122,17 +122,21 @@ function sunTimes(key,lat,lon){
   const w=Math.acos(co)/R, toMs=J=>(J-2440587.5)*86400000;
   return [toMs(Jt-w/360),toMs(Jt+w/360)];
 }
+async function tfetch(u,ms){
+  const c=new AbortController(), t=setTimeout(()=>c.abort(),ms);
+  try{return await fetch(u,{signal:c.signal})}finally{clearTimeout(t)}
+}
 async function getTaf(){
   if(!ICAO) return null;
   for(const u of ['/api/aviation?ids='+ICAO,'https://aviationweather.gov/api/data/taf?ids='+ICAO+'&format=json']){
-    try{const r=await fetch(u);if(!r.ok)continue;const j=await r.json();if(Array.isArray(j)&&j[0]&&j[0].fcsts)return j[0]}catch(e){}
+    try{const r=await tfetch(u,5000);if(!r.ok)continue;const j=await r.json();if(Array.isArray(j)&&j[0]&&j[0].fcsts)return j[0]}catch(e){}
   }
   return null;
 }
 async function getModel(){
   try{
     const u=`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,temperature_2m,dew_point_2m&temperature_unit=fahrenheit&forecast_days=5&timezone=GMT`;
-    const r=await fetch(u); if(!r.ok) return null;
+    const r=await tfetch(u,6000); if(!r.ok) return null;
     const h=(await r.json()).hourly; if(!h||!h.time) return null;
     const m=new Map();
     h.time.forEach((t,i)=>m.set(Date.parse(t+'Z'),{lo:h.cloud_cover_low[i],mi:h.cloud_cover_mid[i],hi:h.cloud_cover_high[i],vis:h.visibility[i],T:h.temperature_2m[i],Td:h.dew_point_2m[i]}));
@@ -214,25 +218,23 @@ const skyWord=c=>c==null?'':c<15?'Clear':c<40?'Mostly Clear':c<65?'Partly Cloudy
 const cardinal=d=>['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(d/22.5)%16];
 
 async function nwsJson(u){
-  for(let i=0;i<4;i++){
+  for(let i=0;i<3;i++){
     try{
-      const r=await fetch(u);
+      const r=await tfetch(u,9000);
       if(r.status===404||r.status===400){const e=new Error('nws');e.nws=true;throw e}
       if(r.ok){const j=await r.json();if(j&&j.properties)return j}
     }catch(e){ if(e.nws) throw e }
-    await new Promise(res=>setTimeout(res,700*(i+1)));
+    await new Promise(res=>setTimeout(res,500*(i+1)));
   }
   throw new Error('weather.gov not responding');
 }
 async function load(){
   try{
     $('ttl').textContent=PLACE+' Forecast'; document.title=PLACE+' Kite Forecast';
-    const pt=await nwsJson(`https://api.weather.gov/points/${LAT.toFixed(4)},${LON.toFixed(4)}`);
-    if(!pt.properties.forecastGridData){const e=new Error('nws');e.nws=true;throw e}
-    if(pt.properties.timeZone&&pt.properties.timeZone!==TZ){TZ=pt.properties.timeZone;mkFmt()}
-    const gj=await nwsJson(pt.properties.forecastGridData);
-    const g=gj.properties;
-    const [taf,model]=await Promise.all([getTaf(),getModel()]);
+    // start the airport + model requests right away, in parallel with the NWS requests
+    const tafP=getTaf(), modelP=getModel();
+    const key=LAT.toFixed(4)+','+LON.toFixed(4);
+    const render=(g,taf,model,pending)=>{
     const L={sky:toHourly(g.skyCover),temp:toHourly(g.temperature),wd:toHourly(g.windDirection),
       ws:toHourly(g.windSpeed),gust:toHourly(g.windGust),pop:toHourly(g.probabilityOfPrecipitation),
       rh:toHourly(g.relativeHumidity),dew:toHourly(g.dewpoint),vis:toHourly(g.visibility),
@@ -328,7 +330,32 @@ async function load(){
       const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
       return `<tr><td><b>${d.name}</b>${sunTxt}</td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'&&!over?dirNote(d.dir):''}</small></td><td>${over||d.s==null?'–':Math.round(d.s)} / ${over||d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
-    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':' · (TAF unavailable)'}${model?'':' · (model data unavailable)'}`;
+    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':pending?' · (airport data loading…)':' · (TAF unavailable)'}${model?'':pending?'':' · (model data unavailable)'}`;
+    };
+    // 1) show the last forecast we saved (if recent) while fresh data loads
+    let shown=false;
+    try{
+      const cg=JSON.parse(localStorage.getItem('grid:'+key)||'null');
+      if(cg&&Date.now()-cg.t<6*3600e3&&cg.g){ if(cg.tz&&cg.tz!==TZ){TZ=cg.tz;mkFmt()} render(cg.g,null,null,true); shown=true; $('sub').innerHTML+=' · refreshing…' }
+    }catch(e){}
+    // 2) NWS: grid URL for a spot never changes, so remember it
+    let gridUrl=null;
+    try{const cu=JSON.parse(localStorage.getItem('gu:'+key)||'null'); if(cu&&cu.url){gridUrl=cu.url; if(cu.tz&&cu.tz!==TZ){TZ=cu.tz;mkFmt()}}}catch(e){}
+    if(!gridUrl){
+      const pt=await nwsJson(`https://api.weather.gov/points/${key}`);
+      if(!pt.properties.forecastGridData){const e=new Error('nws');e.nws=true;throw e}
+      gridUrl=pt.properties.forecastGridData;
+      if(pt.properties.timeZone&&pt.properties.timeZone!==TZ){TZ=pt.properties.timeZone;mkFmt()}
+      try{localStorage.setItem('gu:'+key,JSON.stringify({url:gridUrl,tz:TZ}))}catch(e){}
+    }
+    let gj;
+    try{gj=await nwsJson(gridUrl)}catch(e){ if(e.nws){try{localStorage.removeItem('gu:'+key)}catch(_){}} throw e }
+    const g=gj.properties;
+    try{localStorage.setItem('grid:'+key,JSON.stringify({t:Date.now(),tz:TZ,g}))}catch(e){}
+    // 3) draw as soon as NWS data is in; add airport/model data when it arrives
+    const quick=await Promise.race([Promise.all([tafP,modelP]),new Promise(r=>setTimeout(()=>r(null),800))]);
+    render(g,quick?quick[0]:null,quick?quick[1]:null,!quick);
+    if(!quick){ const [t2,m2]=await Promise.all([tafP,modelP]); render(g,t2,m2,false); }
     return 'ok';
   }catch(e){ $('sub').innerHTML=e.nws?'<span class="err">No forecast for that spot. The National Weather Service only covers the US.</span>':'<span class="err">Could not load the forecast. weather.gov may be down or slow right now. <a href="#" style="color:inherit" onclick="load();return false">Try again</a></span>'; console.error(e); return e.nws?'nws':'err'; }
 }
