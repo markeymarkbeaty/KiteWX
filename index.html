@@ -53,7 +53,7 @@ h1{font-size:20px;margin:14px 12px 2px}
 .ktbl{width:100%;border-collapse:collapse}
 .ktbl th,.ktbl td{border:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
 .ktbl th{background:var(--label);font-size:11px}
-.ktbl td.rt{font-weight:700}
+.ktbl td.rt{font-weight:700}.ktbl td.na{color:var(--mute)}
 .ktbl td.rt::first-letter{text-transform:uppercase}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
 .kdir{text-align:center}.kdir .arrow{font-size:1.5em;line-height:1}.ktbl .kdir small{margin-top:0}
@@ -85,7 +85,7 @@ document.documentElement.setAttribute('data-theme',t)})();
     <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th><th>Wind direction</th></tr></thead>
     <tbody id="kiteRows"><tr><td colspan="4">Loading…</td></tr></tbody>
   </table>
-  <div class="basis">Based on minimum 15m kite and 630cm foil.</div>
+  <div class="basis">Rated on daylight hours only (sunrise to sunset). Based on minimum 15m kite and 630cm foil.</div>
 </aside>
 </div>
 <script>
@@ -106,6 +106,22 @@ const $=id=>document.getElementById(id);
   });
 })();
 
+// Sunrise/sunset (NOAA/Wikipedia sunrise equation), returns UTC ms or null for polar night; midnight sun -> [-Infinity,Infinity]
+function sunTimes(key,lat,lon){
+  const [y,m,d]=key.split('-').map(Number), R=Math.PI/180;
+  const JD=Date.UTC(y,m-1,d,12)/86400000+2440587.5;
+  const n=Math.round(JD-2451545.0), Js=n-lon/360;
+  const M=((357.5291+0.98560028*Js)%360+360)%360;
+  const C=1.9148*Math.sin(M*R)+0.02*Math.sin(2*M*R)+0.0003*Math.sin(3*M*R);
+  const lam=((M+C+180+102.9372)%360+360)%360;
+  const Jt=2451545.0+Js+0.0053*Math.sin(M*R)-0.0069*Math.sin(2*lam*R);
+  const sd=Math.sin(lam*R)*Math.sin(23.4397*R), cd=Math.cos(Math.asin(sd));
+  const co=(Math.sin(-0.833*R)-Math.sin(lat*R)*sd)/(Math.cos(lat*R)*cd);
+  if(co>1) return null;
+  if(co<-1) return [-Infinity,Infinity];
+  const w=Math.acos(co)/R, toMs=J=>(J-2440587.5)*86400000;
+  return [toMs(Jt-w/360),toMs(Jt+w/360)];
+}
 async function getTaf(){
   if(!ICAO) return null;
   for(const u of ['/api/aviation?ids='+ICAO,'https://aviationweather.gov/api/data/taf?ids='+ICAO+'&format=json']){
@@ -275,10 +291,14 @@ async function load(){
     const dayKey=ms=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ}).format(ms);
     const dayName=ms=>new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'long'}).format(ms);
     const t0=Math.floor(Date.now()/3600e3)*3600e3, days=new Map();
-    for(let i=0;i<72;i++){
+    const nHrs=Math.round((times[times.length-1]+STEP*3600e3-t0)/3600e3);
+    for(let i=0;i<nHrs;i++){
       const ms=t0+i*3600e3, key=dayKey(ms);
-      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null,vx:0,vy:0});
-      const d=days.get(key), s=L.ws.get(ms), gu=L.gust.get(ms);
+      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null,vx:0,vy:0,sun:sunTimes(key,LAT,LON),hrs:0});
+      const d=days.get(key);
+      if(!d.sun||ms+1800e3<d.sun[0]||ms+1800e3>d.sun[1]) continue; // daylight hours only
+      d.hrs++;
+      const s=L.ws.get(ms), gu=L.gust.get(ms);
       if(s!=null&&(d.s==null||kt(s)>d.s)){d.s=kt(s);d.dir=L.wd.get(ms)}
       const wdir=L.wd.get(ms); if(s!=null&&wdir!=null){const r=wdir*Math.PI/180;d.vx+=kt(s)*Math.sin(r);d.vy+=kt(s)*Math.cos(r)}
       if(gu!=null&&(d.g==null||kt(gu)>d.g)) d.g=kt(gu);
@@ -298,11 +318,15 @@ async function load(){
       if(d>=21&&d<=160) return 'east wind, not good';
       return '—';
     };
-    $('kiteRows').innerHTML=[...days.values()].slice(0,3).map(d=>{
-      const [txt,cls]=rate(d.s,d.g);
+    $('kiteRows').innerHTML=[...days.values()].map(d=>{
+      const over=d.hrs===0;
+      const [txt,cls]=over?['daylight is over','na']:rate(d.s,d.g);
+      const tf=new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'});
+      const sh=x=>tf.format(x).replace(/ ([AP])M/,(m,a)=>a.toLowerCase());
+      const sunTxt=d.sun&&isFinite(d.sun[0])?`<small>${sh(d.sun[0])}–${sh(d.sun[1])}</small>`:'';
       const pd=(Math.hypot(d.vx,d.vy)>0.5)?((Math.atan2(d.vx,d.vy)*180/Math.PI)+360)%360:null;
       const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
-      return `<tr><td><b>${d.name}</b></td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'?dirNote(d.dir):''}</small></td><td>${d.s==null?'–':Math.round(d.s)} / ${d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
+      return `<tr><td><b>${d.name}</b>${sunTxt}</td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'&&!over?dirNote(d.dir):''}</small></td><td>${over||d.s==null?'–':Math.round(d.s)} / ${over||d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
     $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':' · (TAF unavailable)'}${model?'':' · (model data unavailable)'}`;
     return 'ok';
