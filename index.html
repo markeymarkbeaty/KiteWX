@@ -122,6 +122,22 @@ function sunTimes(key,lat,lon){
   const w=Math.acos(co)/R, toMs=J=>(J-2440587.5)*86400000;
   return [toMs(Jt-w/360),toMs(Jt+w/360)];
 }
+let nbmErr='';
+async function getNbm(){
+  nbmErr=''; if(!ICAO) return null;
+  try{
+    const r=await tfetch('/api/nbm?ids='+ICAO,14000);
+    if(!r.ok){nbmErr='HTTP '+r.status;return null}
+    const j=await r.json();
+    if(!j||!Array.isArray(j.times)){nbmErr='bad data';return null}
+    try{localStorage.setItem('nbm:'+ICAO,JSON.stringify({t:Date.now(),j}))}catch(e){}
+    return j;
+  }catch(e){nbmErr=(e&&e.name==='AbortError')?'timed out':'unreachable';return null}
+}
+function cachedNbm(){
+  try{const c=JSON.parse(localStorage.getItem('nbm:'+ICAO)||'null');if(c&&Date.now()-c.t<3*3600e3)return c.j}catch(e){}
+  return null;
+}
 async function tfetch(u,ms){
   const c=new AbortController(), t=setTimeout(()=>c.abort(),ms);
   try{return await fetch(u,{signal:c.signal})}finally{clearTimeout(t)}
@@ -158,13 +174,16 @@ function modelState(m,ms){
   return {vis:q.vis==null?null:Math.min(10,Math.round(q.vis/1609.34*10)/10),ceil:base(50),low:base(10)};
 }
 function cloudSvg(vals,est){
-  const W=COLS*CW,H=72,top=8,bot=10,MAX=12000;
+  const W=vals.length*CW,H=72,top=6,bot=6,MAX=12000,CH=18;
   let out=`<svg width="${W}" height="${H}">`;
-  [1000,3000,6000,10000].forEach(f=>{const y=H-bot-Math.sqrt(f/MAX)*(H-top-bot-12);out+=`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="2 4" opacity=".6"/>`});
+  [1000,3000,6000,10000].forEach(f=>{const y=H-bot-CH-Math.sqrt(f/MAX)*(H-top-bot-CH);out+=`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="2 4" opacity=".6"/>`});
+  const sc=Math.min(1.25,(CW-2)/30);
   vals.forEach((v,i)=>{
     if(v==null) return;
-    const fr=Math.sqrt(Math.min(v,MAX)/MAX), y=H-bot-fr*(H-top-bot-12)-12, cx=i*CW+CW/2, sc=Math.min(1,(CW-4)/24);
-    out+=`<g transform="translate(${cx-12*sc},${y}) scale(${sc})" opacity="${est[i]?.55:1}"><title>${v>=MAX?'12,000+':v.toLocaleString()} ft${est[i]?' (estimated)':''}</title><path d="M6,13H18a4,4 0 0 0 .6-7.95A5.5,5.5 0 0 0 8,5.2A4,4 0 0 0 6,13Z" fill="#e3e8f2" stroke="#6d7ca3" stroke-width="1"/></g>`;
+    const y=H-bot-CH*sc-Math.sqrt(Math.min(v,MAX)/MAX)*(H-top-bot-CH*sc), cx=i*CW+CW/2;
+    const lab=v>=10000?Math.round(v/1000)+'K':String(v);
+    const col=v<1000?'#c0392b':v<3000?'#1e3cff':'#1b2a4a';
+    out+=`<g transform="translate(${cx-15*sc},${y}) scale(${sc})" opacity="${est[i]?.55:1}"><title>${v>=MAX?'12,000+':v.toLocaleString()} ft${est[i]?' (estimated)':''}</title><path d="M7,17H24a5,5 0 0 0 .8-9.9A7,7 0 0 0 11,5.6A5.6,5.6 0 0 0 7,17Z" fill="#e3e8f2" stroke="#6d7ca3" stroke-width="1"/><text x="15.5" y="14" text-anchor="middle" font-size="8" font-weight="700" fill="${col}" font-family="system-ui,sans-serif">${lab}</text></g>`;
   });
   return out+'</svg>';
 }
@@ -210,7 +229,7 @@ hourNum=t=>+new Intl.DateTimeFormat('en-US',{timeZone:TZ,hour:'numeric',hourCycl
 mkFmt();
 
 function area(vals,color,min,max,fmt=v=>Math.round(v)){
-  const W=COLS*CW,H=80,p=16;
+  const W=vals.length*CW,H=80,p=16;
   const ok=vals.filter(v=>v!=null); if(!ok.length) return '';
   min=min??Math.min(...ok); max=max??Math.max(...ok); if(max===min) max=min+1;
   const x=i=>i*CW+CW/2, y=v=>H-6-((v-min)/(max-min))*(H-6-p);
@@ -239,24 +258,32 @@ async function load(){
   try{
     $('ttl').textContent=PLACE+' Forecast'; document.title=PLACE+' Kite Forecast';
     // start the airport + model requests right away, in parallel with the NWS requests
-    const tafP=getTaf(), modelP=getModel();
+    const tafP=getTaf(), modelP=getModel(), nbmP=getNbm();
     const key=LAT.toFixed(4)+','+LON.toFixed(4);
-    const render=(g,taf,model,pending)=>{
+    const render=(g,taf,model,pending,nbm)=>{
     const L={sky:toHourly(g.skyCover),temp:toHourly(g.temperature),wd:toHourly(g.windDirection),
       ws:toHourly(g.windSpeed),gust:toHourly(g.windGust),pop:toHourly(g.probabilityOfPrecipitation),
       rh:toHourly(g.relativeHumidity),dew:toHourly(g.dewpoint),vis:toHourly(g.visibility),
       ceil:toHourly(g.ceilingHeight),qpf:toHourly(g.quantitativePrecipitation,true),
       thun:toHourly(g.probabilityOfThunder)};
     // first column: next 3-hour boundary (local)
-    let t=Math.ceil(Date.now()/3600e3)*3600e3; while(hourNum(t)%STEP) t+=3600e3;
-    const times=Array.from({length:COLS},(_,i)=>t+i*STEP*3600e3);
+    // Preferred source: NOAA National Blend of Models airport bulletin (same data usairnet shows)
+    let idx=null;
+    if(nbm&&Array.isArray(nbm.times)){const now=Date.now(),a=[];nbm.times.forEach((t,i)=>{if(t!=null&&t>=now-90*60e3)a.push(i)});if(a.length>=8)idx=a.slice(0,24)}
+    const useN=!!idx;
+    const pickN=(arr,f)=>idx.map(i=>{const v=arr?arr[i]:null;return v==null?null:(f?f(v):v)});
+    let times;
+    if(useN) times=idx.map(i=>nbm.times[i]);
+    else{ let t=Math.ceil(Date.now()/3600e3)*3600e3; while(hourNum(t)%STEP) t+=3600e3;
+      times=Array.from({length:COLS},(_,i)=>t+i*STEP*3600e3); }
     const get=(k,conv=v=>v)=>times.map(x=>{const v=L[k].get(x);return v==null?null:conv(v)});
-    const sky=get('sky'), temp=get('temp',c=>c*9/5+32), wd=get('wd'),
-          ws=get('ws',k=>k*0.621371), gust=get('gust',k=>k*0.621371), pop=get('pop'), rh=get('rh');
+    const sky=useN?pickN(nbm.sky):get('sky'), temp=useN?pickN(nbm.tmp):get('temp',c=>c*9/5+32), wd=useN?pickN(nbm.wdr):get('wd'),
+          ws=useN?pickN(nbm.wsp,k=>Math.round(k*1.150779)):get('ws',k=>k*0.621371),
+          gust=useN?pickN(nbm.gst,k=>Math.round(k*1.150779)):get('gust',k=>k*0.621371), pop=get('pop'), rh=get('rh');
     const grid=$('grid'); let h='';
     const small=innerWidth<=900, LW=small?72:84, wrapW=document.querySelector('.layout .wrap').clientWidth;
-    CW=Math.max(small?26:30,Math.min(64,Math.floor((wrapW-LW-8)/COLS)));
-    grid.style.setProperty('--lw',LW+'px'); grid.style.setProperty('--cw',CW+'px');
+    CW=Math.max(small?26:30,Math.min(64,Math.floor((wrapW-LW-8)/times.length)));
+    grid.style.setProperty('--lw',LW+'px'); grid.style.setProperty('--cw',CW+'px'); grid.style.gridTemplateColumns=`var(--lw) repeat(${times.length},var(--cw))`;
     const lb=(n,u)=>`<div class="lab"><div>${n}${u?`<small>${u}</small>`:''}</div></div>`;
     const row=(label,cells)=>h+=label+cells.map(c=>`<div>${c}</div>`).join('');
     const chartRow=(label,svg)=>h+=`${label}<div class="chart">${svg}</div>`;
@@ -265,28 +292,28 @@ async function load(){
     row(lb('Hour'),times.map(x=>hourFmt.format(x)));
     row(lb('Sky'),sky.map(c=>`<span class="sky">${skyIcon(c)}</span>`));
     chartRow(lb('Temp','(F)'),area(temp,'#e8613a'));
-    row(lb('Wind direction','(azimuth)'),wd.map((d,i)=>d==null?'':(ws[i]!=null&&ws[i]<1.5)?'<span class="sm">CALM</span>':`<div><div style="font-size:10px">${Math.round(d)}</div><span class="arrow" style="transform:rotate(${d+180}deg)">↑</span></div>`));
+    row(lb('Wind direction','(azimuth)'),wd.map((d,i)=>d==null?'':(ws[i]!=null&&ws[i]<(useN?0.5:1.5))?'<span class="sm">CALM</span>':`<div><div style="font-size:10px">${Math.round(d)}</div><span class="arrow" style="transform:rotate(${d+180}deg)">↑</span></div>`));
     chartRow(lb('Average wind speeds','(mph)'),area(ws,'#3a9ad9',0));
     chartRow(lb('Maximum wind gust speeds','(mph)'),area(gust,'#4fcf6a',0));
     row(lb('Cloud coverage','%'),sky.map(c=>c==null?'':`<div class="circ" style="${c<40?'opacity:.5':''}">${Math.round(c)}</div>`));
-    const st=times.map(x=>tafState(taf,x));
+    const st=useN?times.map(()=>null):times.map(x=>tafState(taf,x));
     // Backup when the model service is unavailable: estimate from NWS temperature, dew point and sky cover
     const tF=get('temp',c=>c*9/5+32), dF=get('dew',c=>c*9/5+32);
-    const ms_=times.map((x,i)=>{
+    const ms_=useN?times.map(()=>null):times.map((x,i)=>{
       const q=modelState(model,x); if(q||model) return q;
       const sp=(tF[i]!=null&&dF[i]!=null)?Math.max(0,tF[i]-dF[i]):null; if(sp==null) return null;
       const lcl=Math.max(200,Math.round(228*sp/100)*100), cov=sky[i];
       return {vis:sp<=1.5?3:sp<=3?5:10, ceil:(cov!=null&&cov>=60)?lcl:null, low:(cov!=null&&cov>=10)?lcl:null};
     });
-    const est=times.map((x,i)=>!st[i]&&!!ms_[i]);
-    const ceilFt=times.map((x,i)=>st[i]?baseOf(st[i].clouds,['BKN','OVC','OVX']):(ms_[i]?ms_[i].ceil:null));
-    const lowFt=times.map((x,i)=>st[i]?baseOf(st[i].clouds,['FEW','SCT','BKN','OVC','OVX']):(ms_[i]?ms_[i].low:null));
-    const vis=times.map((x,i)=>st[i]?st[i].vis:(ms_[i]?ms_[i].vis:null));
+    const est=useN?times.map(()=>false):times.map((x,i)=>!st[i]&&!!ms_[i]);
+    const ceilFt=useN?pickN(nbm.cig,v=>v<0?null:v):times.map((x,i)=>st[i]?baseOf(st[i].clouds,['BKN','OVC','OVX']):(ms_[i]?ms_[i].ceil:null));
+    const lowFt=useN?pickN(nbm.lcb,v=>v<0?null:v):times.map((x,i)=>st[i]?baseOf(st[i].clouds,['FEW','SCT','BKN','OVC','OVX']):(ms_[i]?ms_[i].low:null));
+    const vis=useN?pickN(nbm.vis):times.map((x,i)=>st[i]?st[i].vis:(ms_[i]?ms_[i].vis:null));
     chartRow(lb('Cloud base @ 60% coverage','(AGL in feet)'),cloudSvg(ceilFt,est));
     chartRow(lb('Lowest cloud base','(AGL in feet)'),cloudSvg(lowFt,est));
     chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>v>=10?'6+':Number.isInteger(v)?v:v.toFixed(1)));
     const rules=times.map((x,i)=>{
-      if(!st[i]&&!ms_[i]) return ['–','var(--panel)','var(--mute)'];
+      if(useN?(vis[i]==null&&nbm.cig[idx[i]]==null):(!st[i]&&!ms_[i])) return ['–','var(--panel)','var(--mute)'];
       const c=ceilFt[i]??99999, v=vis[i]??10;
       return (c<500||v<1)?['LIFR','#c0392b']:(c<1000||v<3)?['IFR','#e67e22']:(c<=3000||v<=5)?['MVFR','#1e3cff']:['VFR','#1f8a2e'];
     });
@@ -296,7 +323,7 @@ async function load(){
     row(lb('Precip amount','(range in inches)'),qpf.map(v=>v==null||v<0.005?'-':v.toFixed(2)));
     row(lb('Chance of thunder','%'),get('thun').map(v=>v==null?'':Math.round(v)));
     chartRow(lb('Rel hum','%'),area(rh,'#8f86f0',0,100));
-    const dew=get('dew',c=>c*9/5+32);
+    const dew=useN?pickN(nbm.dpt):get('dew',c=>c*9/5+32);
     chartRow(lb('Dew point','(F)'),area(dew,'#6fd48a'));
     const spread=temp.map((t,i)=>t==null||dew[i]==null?null:t-dew[i]);
     chartRow(lb('Temp dew point spread','(F)'),area(spread,'#e88a8a',0));
@@ -306,18 +333,22 @@ async function load(){
     const kt=k=>k*0.539957;
     const dayKey=ms=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ}).format(ms);
     const dayName=ms=>new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'long'}).format(ms);
-    const t0=Math.floor(Date.now()/3600e3)*3600e3, days=new Map();
-    const nHrs=Math.round((times[times.length-1]+STEP*3600e3-t0)/3600e3);
-    for(let i=0;i<nHrs;i++){
-      const ms=t0+i*3600e3, key=dayKey(ms);
-      if(!days.has(key)) days.set(key,{name:dayName(ms),s:null,g:null,dir:null,vx:0,vy:0,sun:sunTimes(key,LAT,LON),hrs:0});
+    const days=new Map(), samples=[];
+    if(useN){ times.forEach((x,i)=>samples.push({ms:x,mid:x,s:nbm.wsp[idx[i]],g:nbm.gst[idx[i]],dir:nbm.wdr[idx[i]]})); }
+    else{
+      const t0=Math.floor(Date.now()/3600e3)*3600e3;
+      const nHrs=Math.round((times[times.length-1]+STEP*3600e3-t0)/3600e3);
+      for(let i=0;i<nHrs;i++){const ms=t0+i*3600e3,s=L.ws.get(ms),gu=L.gust.get(ms);samples.push({ms,mid:ms+1800e3,s:s==null?null:kt(s),g:gu==null?null:kt(gu),dir:L.wd.get(ms)})}
+    }
+    for(const p of samples){
+      const key=dayKey(p.ms);
+      if(!days.has(key)) days.set(key,{name:dayName(p.ms),s:null,g:null,dir:null,vx:0,vy:0,sun:sunTimes(key,LAT,LON),hrs:0});
       const d=days.get(key);
-      if(!d.sun||ms+1800e3<d.sun[0]||ms+1800e3>d.sun[1]) continue; // daylight hours only
+      if(!d.sun||p.mid<d.sun[0]||p.mid>d.sun[1]) continue; // daylight hours only
       d.hrs++;
-      const s=L.ws.get(ms), gu=L.gust.get(ms);
-      if(s!=null&&(d.s==null||kt(s)>d.s)){d.s=kt(s);d.dir=L.wd.get(ms)}
-      const wdir=L.wd.get(ms); if(s!=null&&wdir!=null){const r=wdir*Math.PI/180;d.vx+=kt(s)*Math.sin(r);d.vy+=kt(s)*Math.cos(r)}
-      if(gu!=null&&(d.g==null||kt(gu)>d.g)) d.g=kt(gu);
+      if(p.s!=null&&(d.s==null||p.s>d.s)){d.s=p.s;d.dir=p.dir}
+      if(p.s!=null&&p.dir!=null){const r=p.dir*Math.PI/180;d.vx+=p.s*Math.sin(r);d.vy+=p.s*Math.cos(r)}
+      if(p.g!=null&&(d.g==null||p.g>d.g)) d.g=p.g;
     }
     const rate=(s,g)=>{
       if(s!=null&&s>=15) return ["work is canceled, you're going kiting!","good"];
@@ -344,13 +375,16 @@ async function load(){
       const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
       return `<tr><td><b>${d.name}</b>${sunTxt}</td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'&&!over?dirNote(d.dir):''}</small></td><td>${over||d.s==null?'–':Math.round(d.s)} / ${over||d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
-    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':pending?' · (airport data loading…)':' · (TAF unavailable)'}${model?'':pending?'':' · (model data unavailable'+(modelErr?': '+modelErr:'')+' – estimated from NWS data instead)'}`;
+    const srcTxt=useN
+      ? `Wind, temperature, clouds &amp; visibility: NOAA National Blend of Models (${nbm.station||ICAO}, ${String(nbm.issued).slice(11,16)}Z run, the same source as usairnet) · Rain, thunder &amp; humidity: NWS`
+      : `Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds)${taf?'':pending?' · (airport data loading…)':' · (TAF unavailable)'}${model?'':pending?'':' · (model data unavailable'+(modelErr?': '+modelErr:'')+' – estimated from NWS data instead)'}${ICAO&&!pending?' · (NBM unavailable'+(nbmErr?': '+nbmErr:'')+' – using NWS forecast)':''}`;
+    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · ${srcTxt} · 3-hour steps`;
     };
     // 1) show the last forecast we saved (if recent) while fresh data loads
     let shown=false;
     try{
       const cg=JSON.parse(localStorage.getItem('grid:'+key)||'null');
-      if(cg&&Date.now()-cg.t<6*3600e3&&cg.g){ if(cg.tz&&cg.tz!==TZ){TZ=cg.tz;mkFmt()} render(cg.g,null,null,true); shown=true; $('sub').innerHTML+=' · refreshing…' }
+      if(cg&&Date.now()-cg.t<6*3600e3&&cg.g){ if(cg.tz&&cg.tz!==TZ){TZ=cg.tz;mkFmt()} render(cg.g,null,null,true,ICAO?cachedNbm():null); shown=true; $('sub').innerHTML+=' · refreshing…' }
     }catch(e){}
     // 2) NWS: grid URL for a spot never changes, so remember it
     let gridUrl=null;
@@ -366,10 +400,15 @@ async function load(){
     try{gj=await nwsJson(gridUrl)}catch(e){ if(e.nws){try{localStorage.removeItem('gu:'+key)}catch(_){}} throw e }
     const g=gj.properties;
     try{localStorage.setItem('grid:'+key,JSON.stringify({t:Date.now(),tz:TZ,g}))}catch(e){}
-    // 3) draw as soon as NWS data is in; add airport/model data when it arrives
+    // 3) prefer the National Blend of Models (waits a few seconds); otherwise draw NWS data and fill in the rest later
+    let nbm=null;
+    if(ICAO) nbm=await Promise.race([nbmP,new Promise(r=>setTimeout(()=>r(null),4500))]);
+    if(nbm){ render(g,null,null,false,nbm); return 'ok'; }
     const quick=await Promise.race([Promise.all([tafP,modelP]),new Promise(r=>setTimeout(()=>r(null),800))]);
-    render(g,quick?quick[0]:null,quick?quick[1]:null,!quick);
-    if(!quick){ const [t2,m2]=await Promise.all([tafP,modelP]); render(g,t2,m2,false); }
+    render(g,quick?quick[0]:null,quick?quick[1]:null,!quick,null);
+    let t2=quick?quick[0]:null, m2=quick?quick[1]:null;
+    if(!quick){ [t2,m2]=await Promise.all([tafP,modelP]); render(g,t2,m2,false,null); }
+    if(ICAO){ const n2=await nbmP; if(n2) render(g,t2,m2,false,n2); }
     return 'ok';
   }catch(e){ $('sub').innerHTML=e.nws?'<span class="err">No forecast for that spot. The National Weather Service only covers the US.</span>':'<span class="err">Could not load the forecast. weather.gov may be down or slow right now. <a href="#" style="color:inherit" onclick="load();return false">Try again</a></span>'; console.error(e); return e.nws?'nws':'err'; }
 }
