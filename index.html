@@ -133,15 +133,22 @@ async function getTaf(){
   }
   return null;
 }
+let modelErr='';
 async function getModel(){
-  try{
-    const u=`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,temperature_2m,dew_point_2m&temperature_unit=fahrenheit&forecast_days=5&timezone=GMT`;
-    const r=await tfetch(u,6000); if(!r.ok) return null;
-    const h=(await r.json()).hourly; if(!h||!h.time) return null;
-    const m=new Map();
-    h.time.forEach((t,i)=>m.set(Date.parse(t+'Z'),{lo:h.cloud_cover_low[i],mi:h.cloud_cover_mid[i],hi:h.cloud_cover_high[i],vis:h.visibility[i],T:h.temperature_2m[i],Td:h.dew_point_2m[i]}));
-    return m;
-  }catch(e){return null}
+  modelErr='';
+  const direct=`https://api.open-meteo.com/v1/forecast?latitude=${LAT.toFixed(4)}&longitude=${LON.toFixed(4)}&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,temperature_2m,dew_point_2m&temperature_unit=fahrenheit&forecast_days=5&timezone=GMT`;
+  for(const u of [`/api/model?lat=${LAT.toFixed(4)}&lon=${LON.toFixed(4)}`,direct]){
+    try{
+      const r=await tfetch(u,8000);
+      if(!r.ok){modelErr='HTTP '+r.status;continue}
+      const h=(await r.json()).hourly;
+      if(!h||!h.time){modelErr='no data returned';continue}
+      const m=new Map();
+      h.time.forEach((t,i)=>m.set(Date.parse(t+'Z'),{lo:h.cloud_cover_low[i],mi:h.cloud_cover_mid[i],hi:h.cloud_cover_high[i],vis:h.visibility[i],T:h.temperature_2m[i],Td:h.dew_point_2m[i]}));
+      modelErr=''; return m;
+    }catch(e){modelErr=(e&&e.name==='AbortError')?'timed out':'blocked or offline'}
+  }
+  return null;
 }
 // Rough estimate from model cloud layers: low cloud base ~ 228 ft per °F of temp/dew point spread
 function modelState(m,ms){
@@ -330,7 +337,7 @@ async function load(){
       const dcell=pd==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${pd+180}deg)">↑</span><small>${cardinal(pd)} ${Math.round(pd)}°</small></div>`;
       return `<tr><td><b>${d.name}</b>${sunTxt}</td><td class="rt ${cls}">${txt}<small>${ICAO==='KSAN'&&!over?dirNote(d.dir):''}</small></td><td>${over||d.s==null?'–':Math.round(d.s)} / ${over||d.g==null?'–':Math.round(d.g)}</td><td>${dcell}</td></tr>`;
     }).join('');
-    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':pending?' · (airport data loading…)':' · (TAF unavailable)'}${model?'':pending?'':' · (model data unavailable)'}`;
+    $('sub').innerHTML=`Updated ${new Date().toLocaleTimeString('en-US',{timeZone:TZ,timeZoneName:'short'})} · Source: NWS / weather.gov · Cloud base &amp; visibility: ${ICAO?ICAO+' TAF for about 30 hours, then a model estimate':'model estimate only'} (faded clouds) · 3-hour steps${taf?'':pending?' · (airport data loading…)':' · (TAF unavailable)'}${model?'':pending?'':' · (model data unavailable'+(modelErr?': '+modelErr:'')+')'}`;
     };
     // 1) show the last forecast we saved (if recent) while fresh data loads
     let shown=false;
