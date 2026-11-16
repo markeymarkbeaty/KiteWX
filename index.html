@@ -46,20 +46,26 @@ h1{font-size:20px;margin:14px 12px 2px}
 .err{padding:12px;color:#ffb4b4}
 .layout{display:flex;align-items:flex-start;gap:12px;padding-right:12px}
 .layout .wrap{flex:1;min-width:0}
-#kiteBox{flex:0 0 300px;margin-top:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;line-height:1.35}
-#kiteBox h2{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
-#kiteBox h3{margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
-#kiteBox ul{margin:0;padding-left:16px}#kiteBox li{margin:2px 0}
+#side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px}
+.sbox{margin-top:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;line-height:1.35}
+.sbox h2{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
+.sbox h3{margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
+.sbox ul{margin:0;padding-left:16px}.sbox li{margin:2px 0}
 .ktbl{width:100%;border-collapse:collapse}
 .ktbl th,.ktbl td{border:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
 .ktbl th{background:var(--label);font-size:11px}
 .ktbl td.rt{font-weight:700}.ktbl td.na{color:var(--mute)}
 .ktbl td.rt::first-letter{text-transform:uppercase}
 .ktbl td.good{background:#14532d}.ktbl td.meh{background:#78560f}.ktbl td.bad{background:#6b1d1d}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+.chips button{font:inherit;font-size:11px;padding:3px 7px;border-radius:999px;border:1px solid var(--line);background:var(--bg);color:var(--text);cursor:pointer}
+.chips button.on{background:var(--label);font-weight:700}
+.tcurve{display:block;width:100%;height:64px;margin:6px 0 8px}
+.ktbl td.num{white-space:nowrap}
 .kdir{text-align:center}.kdir .arrow{font-size:1.5em;line-height:1}.ktbl .kdir small{margin-top:0}
 .ktbl small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
 .basis{margin-top:10px;color:var(--mute);font-size:11px}
-@media(max-width:900px){body{overflow-x:hidden}.layout{flex-direction:column;padding:0 8px;width:800px;min-width:800px;overflow:hidden}.grid{font-size:10px}.lab{font-size:9px;padding:2px;position:static}.layout .wrap{width:100%;overflow:hidden}#kiteBox{order:-1;flex:none;width:100%;margin-top:8px;font-size:18px;padding:14px}#kiteBox h2{font-size:20px}.ktbl th,.ktbl td{font-size:17px;padding:8px 10px}.basis{font-size:15px}}
+@media(max-width:900px){body{overflow-x:hidden}.layout{flex-direction:column;padding:0 8px;width:800px;min-width:800px;overflow:hidden}.grid{font-size:10px}.lab{font-size:9px;padding:2px;position:static}.layout .wrap{width:100%;overflow:hidden}#side{order:-1;flex:none;width:100%;margin-top:8px}.sbox{font-size:18px;padding:14px}.sbox h2{font-size:20px}.chips button{font-size:16px;padding:6px 10px}.tcurve{height:110px}.ktbl th,.ktbl td{font-size:17px;padding:8px 10px}.basis{font-size:15px}}
 </style>
 <script>
 (function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}
@@ -79,7 +85,8 @@ document.documentElement.setAttribute('data-theme',t)})();
 <p class="sub" id="sub">Loading from weather.gov…</p>
 <div class="layout">
 <div class="wrap"><div class="grid" id="grid"></div></div>
-<aside id="kiteBox">
+<div id="side">
+<aside id="kiteBox" class="sbox">
   <h2>Kiteability</h2>
   <table class="ktbl">
     <thead><tr><th>Day</th><th>Rating</th><th>Wind / gust (kt)</th><th>Wind direction</th></tr></thead>
@@ -87,6 +94,26 @@ document.documentElement.setAttribute('data-theme',t)})();
   </table>
   <div class="basis">Rated on daylight hours only (sunrise to sunset). Based on minimum 15m kite and 630cm foil.</div>
 </aside>
+<aside id="waveBox" class="sbox" hidden>
+  <h2>Swell / wave height</h2>
+  <div class="chips" id="waveChips"></div>
+  <table class="ktbl">
+    <thead><tr><th>Spot</th><th>Swell (ft)</th><th>Period</th><th>From</th></tr></thead>
+    <tbody id="waveRows"><tr><td colspan="4">Loading…</td></tr></tbody>
+  </table>
+  <div class="basis" id="waveNote"></div>
+</aside>
+<aside id="tideBox" class="sbox" hidden>
+  <h2>Tides</h2>
+  <div class="chips" id="tideChips"></div>
+  <svg class="tcurve" id="tideCurve" viewBox="0 0 280 64" preserveAspectRatio="none"></svg>
+  <table class="ktbl">
+    <thead><tr><th>Tide</th><th>Time</th><th>Height (ft)</th></tr></thead>
+    <tbody id="tideRows"><tr><td colspan="3">Loading…</td></tr></tbody>
+  </table>
+  <div class="basis" id="tideNote"></div>
+</aside>
+</div>
 </div>
 <script>
 let CW=54;
@@ -171,7 +198,7 @@ function modelState(m,ms){
   const q=m&&m.get(Math.floor(ms/3600e3)*3600e3); if(!q) return null;
   const lcl=Math.max(200,Math.round(228*Math.max(0,q.T-q.Td)/100)*100);
   const base=(thr)=>q.lo>=thr?lcl:q.mi>=thr?10000:q.hi>=thr?25000:null;
-  return {vis:q.vis==null?null:Math.min(10,Math.round(q.vis/1609.34*10)/10),ceil:base(50),low:base(10)};
+  return {vis:q.vis==null?null:(q.vis/1609.34>=6?10:Math.round(q.vis/1609.34*10)/10),ceil:base(50),low:base(10)};
 }
 function cloudSvg(vals,est){
   const W=vals.length*CW,H=72,top=6,bot=6,MAX=12000,CH=18;
@@ -254,8 +281,98 @@ async function nwsJson(u){
   }
   throw new Error('weather.gov not responding');
 }
+// ---------- Swell / wave and tide boxes (San Diego area) ----------
+const SPOTS=[{n:'Sunset Cliffs',lat:32.715,lon:-117.275},{n:"Old Man's (Tourmaline)",lat:32.800,lon:-117.285},{n:'Pacific Beach',lat:32.795,lon:-117.285}];
+const TIDE_STATIONS=[['9410230','La Jolla'],['9410170','San Diego']];
+const SIDE={wave:null,tide:null,tideH:null,station:'',wd:null,td:null,t:0,busy:false};
+const dkey=d=>new Intl.DateTimeFormat('en-CA',{timeZone:TZ}).format(d);
+const chipLbl=(k,today)=>k===today?'Today':new Intl.DateTimeFormat('en-US',{timeZone:'UTC',weekday:'short',day:'numeric'}).format(new Date(k+'T12:00:00Z'));
+const CARD16=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const card16=d=>CARD16[Math.round(((d%360)+360)%360/22.5)%16];
+function chipsHtml(keys,sel){const t=dkey(new Date());return keys.map(k=>`<button type="button" data-k="${k}" class="${k===sel?'on':''}">${chipLbl(k,t)}</button>`).join('')}
+async function jget(urls,ms){
+  for(const u of urls){try{const r=await tfetch(u,ms);if(!r.ok)continue;const j=await r.json();if(j)return j}catch(e){}}
+  return null;
+}
+function renderWave(){
+  const d=SIDE.wave; if(!d){$('waveRows').innerHTML='<tr><td colspan="4">Swell data unavailable right now.</td></tr>';$('waveChips').innerHTML='';return}
+  const keys=[...new Set(d[0].hourly.time.map(t=>t.slice(0,10)))];
+  if(!SIDE.wd||!keys.includes(SIDE.wd)) SIDE.wd=keys[0];
+  $('waveChips').innerHTML=chipsHtml(keys,SIDE.wd);
+  const rows=SPOTS.map((sp,i)=>{
+    const h=d[i]&&d[i].hourly; if(!h) return `<tr><td><b>${sp.n}</b></td><td colspan="3">–</td></tr>`;
+    const hs=[],ps=[],ds=[];
+    h.time.forEach((t,j)=>{ if(t.slice(0,10)!==SIDE.wd) return; const hr=+t.slice(11,13); if(hr<6||hr>18) return;
+      const ht=h.swell_wave_height&&h.swell_wave_height[j]!=null?h.swell_wave_height[j]:h.wave_height&&h.wave_height[j];
+      const pr=h.swell_wave_period&&h.swell_wave_period[j]!=null?h.swell_wave_period[j]:h.wave_period&&h.wave_period[j];
+      const dr=h.swell_wave_direction&&h.swell_wave_direction[j]!=null?h.swell_wave_direction[j]:h.wave_direction&&h.wave_direction[j];
+      if(ht!=null){hs.push(ht);if(pr!=null)ps.push(pr);if(dr!=null)ds.push([dr,ht])}});
+    if(!hs.length) return `<tr><td><b>${sp.n}</b></td><td colspan="3">–</td></tr>`;
+    const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+    let sx=0,sy=0;ds.forEach(([dg,w])=>{sx+=w*Math.sin(dg*Math.PI/180);sy+=w*Math.cos(dg*Math.PI/180)});
+    const dir=ds.length?((Math.atan2(sx,sy)*180/Math.PI)+360)%360:null;
+    const mean=avg(hs),mx=Math.max(...hs);
+    return `<tr><td><b>${sp.n}</b></td><td class="num">${mean.toFixed(1)}<small>max ${mx.toFixed(1)}</small></td><td class="num">${ps.length?Math.round(avg(ps))+' s':'–'}</td><td>${dir==null?'–':`<div class="kdir"><span class="arrow" style="transform:rotate(${dir+180}deg)">↑</span><small>${card16(dir)} ${Math.round(dir)}°</small></div>`}</td></tr>`;
+  });
+  $('waveRows').innerHTML=rows.join('');
+  $('waveNote').textContent='Daytime (6 am–6 pm) open-water swell forecast from Open-Meteo Marine. It is a coastal model, so nearby spots look similar and surf-zone size varies with local conditions.';
+}
+function renderTide(){
+  const ev=SIDE.tide; if(!ev){$('tideRows').innerHTML='<tr><td colspan="3">Tide data unavailable right now.</td></tr>';$('tideChips').innerHTML='';$('tideCurve').innerHTML='';return}
+  const keys=[...new Set(ev.map(e=>e.t.slice(0,10)))];
+  if(!SIDE.td||!keys.includes(SIDE.td)) SIDE.td=keys[0];
+  $('tideChips').innerHTML=chipsHtml(keys,SIDE.td);
+  const fmt=t=>{let h=+t.slice(11,13);const m=t.slice(14,16),ap=h>=12?'PM':'AM';h=h%12||12;return h+':'+m+' '+ap};
+  $('tideRows').innerHTML=ev.filter(e=>e.t.slice(0,10)===SIDE.td).map(e=>`<tr><td><b>${e.type==='H'?'High':'Low'}</b></td><td class="num">${fmt(e.t)}</td><td class="num">${(+e.v).toFixed(1)}</td></tr>`).join('')||'<tr><td colspan="3">–</td></tr>';
+  const pts=(SIDE.tideH||[]).filter(p=>p.t.slice(0,10)===SIDE.td).map(p=>({x:+p.t.slice(11,13)+(+p.t.slice(14,16))/60,y:+p.v}));
+  const svg=$('tideCurve');
+  if(pts.length<3){svg.innerHTML='';}else{
+    const lo=Math.min(...pts.map(p=>p.y)),hi=Math.max(...pts.map(p=>p.y)),rg=(hi-lo)||1;
+    const X=x=>x/23*280,Y=y=>56-((y-lo)/rg)*48;
+    const line=pts.map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.y).toFixed(1)).join(' ');
+    let now='';
+    if(SIDE.td===dkey(new Date())){const p=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()).split(':');const nx=X(Math.min(23,+p[0]+ +p[1]/60));now=`<line x1="${nx}" x2="${nx}" y1="0" y2="64" stroke="#e0b030" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`}
+    svg.innerHTML=`<path d="${line} L${X(pts[pts.length-1].x)} 64 L${X(pts[0].x)} 64 Z" fill="var(--label)" opacity=".8"/><path d="${line}" fill="none" stroke="var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>${now}`;
+  }
+  $('tideNote').textContent='NOAA tide predictions for '+SIDE.station+', heights in feet above MLLW (local time). The yellow line marks the current time.';
+}
+async function loadSide(force){
+  const on=ICAO==='KSAN';
+  $('waveBox').hidden=!on; $('tideBox').hidden=!on;
+  if(!on||SIDE.busy) return;
+  if(!force&&SIDE.t&&Date.now()-SIDE.t<20*60e3) return;
+  try{const c=JSON.parse(localStorage.getItem('side')||'null');if(c&&Date.now()-c.t<6*3600e3&&!SIDE.t){SIDE.wave=c.wave;SIDE.tide=c.tide;SIDE.tideH=c.tideH;SIDE.station=c.station||'';renderWave();renderTide()}}catch(e){}
+  SIDE.busy=true;
+  try{
+    const lat=SPOTS.map(s=>s.lat).join(','),lon=SPOTS.map(s=>s.lon).join(',');
+    const now=new Date(),end=new Date(now.getTime()+6*86400e3);
+    const ymd=d=>dkey(d).replace(/-/g,'');
+    const waveP=jget(['/api/marine?lat='+lat+'&lon='+lon+'&tz='+encodeURIComponent(TZ),
+      'https://marine-api.open-meteo.com/v1/marine?latitude='+lat+'&longitude='+lon+'&hourly=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction&length_unit=imperial&forecast_days=7&timezone='+encodeURIComponent(TZ)],12000);
+    const tideP=(async()=>{
+      for(const [st,nm] of TIDE_STATIONS){
+        const q='&begin='+ymd(now)+'&end='+ymd(end);
+        const direct=iv=>'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&application=ksan_kite_forecast&begin_date='+ymd(now)+'&end_date='+ymd(end)+'&datum=MLLW&station='+st+'&time_zone=lst_ldt&interval='+iv+'&units=english&format=json';
+        const [hl,hr]=await Promise.all([jget(['/api/tides?station='+st+q+'&interval=hilo',direct('hilo')],10000),jget(['/api/tides?station='+st+q+'&interval=h',direct('h')],10000)]);
+        if(hl&&hl.predictions&&hl.predictions.length) return {ev:hl.predictions,h:(hr&&hr.predictions)||[],name:nm};
+      }
+      return null;
+    })();
+    const [w,t]=await Promise.all([waveP,tideP]);
+    const wv=w&&(Array.isArray(w)?w:[w]);
+    if(wv&&wv.length===SPOTS.length&&wv[0].hourly) SIDE.wave=wv;
+    if(t){SIDE.tide=t.ev;SIDE.tideH=t.h;SIDE.station=t.name}
+    if(SIDE.wave||SIDE.tide) SIDE.t=Date.now();
+    renderWave();renderTide();
+    try{localStorage.setItem('side',JSON.stringify({t:Date.now(),wave:SIDE.wave,tide:SIDE.tide,tideH:SIDE.tideH,station:SIDE.station}))}catch(e){}
+  }finally{SIDE.busy=false}
+}
+$('waveChips').addEventListener('click',e=>{const b=e.target.closest('button');if(b){SIDE.wd=b.dataset.k;renderWave()}});
+$('tideChips').addEventListener('click',e=>{const b=e.target.closest('button');if(b){SIDE.td=b.dataset.k;renderTide()}});
+
 async function load(){
   try{
+    loadSide();
     $('ttl').textContent=PLACE+' Forecast'; document.title=PLACE+' Kite Forecast';
     // start the airport + model requests right away, in parallel with the NWS requests
     const tafP=getTaf(), modelP=getModel(), nbmP=getNbm();
@@ -311,7 +428,7 @@ async function load(){
     const vis=useN?pickN(nbm.vis):times.map((x,i)=>st[i]?st[i].vis:(ms_[i]?ms_[i].vis:null));
     chartRow(lb('Cloud base @ 60% coverage','(AGL in feet)'),cloudSvg(ceilFt,est));
     chartRow(lb('Lowest cloud base','(AGL in feet)'),cloudSvg(lowFt,est));
-    chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>v>=10?'6+':Number.isInteger(v)?v:v.toFixed(1)));
+    chartRow(lb('Visibility','(miles)'),area(vis,'#2f3fd6',0,10,v=>v>=10?(useN?'10':'6+'):Number.isInteger(v)?v:v.toFixed(1)));
     const rules=times.map((x,i)=>{
       if(useN?(vis[i]==null&&nbm.cig[idx[i]]==null):(!st[i]&&!ms_[i])) return ['–','var(--panel)','var(--mute)'];
       const c=ceilFt[i]??99999, v=vis[i]??10;
