@@ -1,7 +1,7 @@
 // Vercel serverless function: reads the NOAA National Blend of Models (NBM) "NBS" station bulletin
 // (3-hourly, out to 72 hours) for one airport. This is the same kind of data usairnet shows.
 // Returns JSON in friendly units: deg F, knots, degrees, percent, feet, miles.
-const HDR = /^\W*([A-Z0-9]{3,5})\s+NBM\s+V\S+\s+NB[A-Z]\s+GUIDANCE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})\s+UTC/i;
+const HDR = /^\W*([A-Z0-9]{3,6})\s+NBM(?:\s+V\S+)?\s+NB[A-Z]\s+GUIDANCE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})\s+UTC/i;
 
 async function grab(url, ms) {
   const c = new AbortController(), t = setTimeout(() => c.abort(), ms);
