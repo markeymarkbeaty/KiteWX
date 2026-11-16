@@ -1,7 +1,7 @@
 // Vercel serverless function: reads the NOAA National Blend of Models (NBM) "NBS" station bulletin
 // (3-hourly, out to 72 hours) for one airport. This is the same kind of data usairnet shows.
 // Returns JSON in friendly units: deg F, knots, degrees, percent, feet, miles.
-const HDR = /^\s*([A-Z0-9]{3,5})\s+NBM\s+V[\d.]+\s+NBS\s+GUIDANCE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})\s+UTC/;
+const HDR = /^\W*([A-Z0-9]{3,5})\s+NBM\s+V\S+\s+NB[A-Z]\s+GUIDANCE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})\s+UTC/i;
 
 async function grab(url, ms) {
   const c = new AbortController(), t = setTimeout(() => c.abort(), ms);
@@ -66,11 +66,12 @@ async function findBlock(url, id) {
     buf += done ? dec.decode() : dec.decode(value, { stream: true });
     const lines = buf.split('\n');
     buf = done ? '' : lines.pop();
-    for (const ln of lines) {
+    for (let ln of lines) {
+      ln = ln.replace(/\r$/, '');
       const m = HDR.exec(ln);
       if (m) {
         if (collecting) { try { await reader.cancel(); } catch (e) {} return { status: 200, lines: out }; }
-        if (m[1] === id) { collecting = true; out.push(ln); }
+        if (m[1].toUpperCase() === id) { collecting = true; out.push(ln); }
         continue;
       }
       if (collecting) out.push(ln);
@@ -83,6 +84,25 @@ async function findBlock(url, id) {
 async function handler(req, res) {
   try {
     const id = String((req.query && req.query.ids) || '').toUpperCase();
+    if (req.query && req.query.debug) {
+      const t = new Date(Date.now() - 3 * 3600e3);
+      const ymd = t.toISOString().slice(0, 10).replace(/-/g, ''), hh = String(t.getUTCHours()).padStart(2, '0');
+      const out = {};
+      for (const base of ['https://noaa-nbm-grib2-pds.s3.amazonaws.com/', 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/blend/prod/']) {
+        const u = base + `blend.${ymd}/${hh}/text/blend_nbstx.t${hh}z`;
+        try {
+          const r = await grab(u, 20000);
+          if (!r || !r.ok) { out[u] = 'HTTP ' + (r ? r.status : 'none'); continue; }
+          const rd = r.body.getReader(), dec = new TextDecoder();
+          let buf = '', n = 0;
+          while (n < 400000) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true }); n = buf.length; }
+          try { await rd.cancel(); } catch (e) {}
+          const L = buf.split('\n');
+          out[u] = { head: L.slice(0, 12), withId: L.filter(x => x.includes(id)).slice(0, 5), headers: L.filter(x => /GUIDANCE/.test(x)).slice(0, 6) };
+        } catch (e) { out[u] = 'error ' + e.message; }
+      }
+      return res.status(200).json(out);
+    }
     if (!/^[A-Z0-9]{3,4}$/.test(id)) return res.status(400).json({ error: 'bad id' });
     const now = Date.now();
     let sawFile = false;
